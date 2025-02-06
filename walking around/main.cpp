@@ -38,6 +38,73 @@ void check_output(HRESULT res, std::source_location loc = std::source_location::
     }
 }
 
+class Depth_buffer {
+    private:
+        ComPtr<ID3D12DescriptorHeap> m_depthBuffHeap;
+        ComPtr<ID3D12Resource> m_depthBuffer;
+
+        D3D12_CPU_DESCRIPTOR_HANDLE m_depthStencilView;
+
+        void init_descriptor_heap(ComPtr<ID3D12Device> &device) {
+            D3D12_DESCRIPTOR_HEAP_DESC depthBuffHeapDesc = {
+                .Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
+                .NumDescriptors = 1,
+                .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+                .NodeMask = 0,
+            };
+
+            device->CreateDescriptorHeap(&depthBuffHeapDesc, IID_PPV_ARGS(&m_depthBuffHeap));
+        }
+
+    public:
+        void init(ComPtr<ID3D12Device> &device, UINT width, UINT height) {
+            init_descriptor_heap(device);
+            D3D12_HEAP_PROPERTIES heapProps = {
+                .Type = D3D12_HEAP_TYPE_DEFAULT,
+                .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+                .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+                .CreationNodeMask = 1,
+                .VisibleNodeMask = 1,
+
+            };
+
+            D3D12_RESOURCE_DESC desc = {
+                .Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+                .Alignment = 0,
+                .Width = width,
+                .Height = height,
+                .DepthOrArraySize = 1,
+                .MipLevels = 0,
+                .Format = DXGI_FORMAT_D32_FLOAT,
+                .SampleDesc = {.Count = 1, .Quality = 0},
+                .Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN,
+                .Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL
+            };
+
+            D3D12_CLEAR_VALUE clear_val = {
+                .Format = DXGI_FORMAT_D32_FLOAT, .DepthStencil = {.Depth = 1.0f, .Stencil = 0}
+            };
+
+            device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+                                            D3D12_RESOURCE_STATE_DEPTH_WRITE, &clear_val,
+                                            IID_PPV_ARGS(&m_depthBuffer));
+
+
+            D3D12_DEPTH_STENCIL_VIEW_DESC view_desc{.Format = DXGI_FORMAT_D32_FLOAT,
+                                                    .ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D,
+                                                    .Flags = D3D12_DSV_FLAG_NONE,
+                                                    .Texture2D = {}};
+
+
+            m_depthStencilView = m_depthBuffHeap->GetCPUDescriptorHandleForHeapStart();
+            device->CreateDepthStencilView(m_depthBuffer.Get(), &view_desc, m_depthStencilView);
+        }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE &get_view() {
+            return m_depthStencilView;
+        }
+};
+
 class painter {
     private:
 
@@ -64,10 +131,11 @@ class painter {
         ComPtr<ID3D12GraphicsCommandList> m_commandList[FrameCount];
         ComPtr<ID3D12Fence> m_fence;
 
-        ComPtr<ID3D12DescriptorHeap> m_depthBuffHeap;
-        ComPtr<ID3D12Resource> m_depthBuffer;
+        // ComPtr<ID3D12DescriptorHeap> m_depthBuffHeap;
+        // ComPtr<ID3D12Resource> m_depthBuffer;
 
-        D3D12_CPU_DESCRIPTOR_HANDLE m_depthStencilView;
+        // D3D12_CPU_DESCRIPTOR_HANDLE m_depthStencilView;
+        Depth_buffer depth_buffer;
 
         ComPtr<ID3D12RootSignature> m_rootSignature;
         ComPtr<ID3D12PipelineState> m_pipelineState;
@@ -436,6 +504,7 @@ class painter {
         }
 
         void init_depth_descriptor_heap() {
+            /*
             D3D12_DESCRIPTOR_HEAP_DESC depthBuffHeapDesc = {
                 .Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
                 .NumDescriptors = 1,
@@ -444,11 +513,14 @@ class painter {
             };
 
             m_device->CreateDescriptorHeap(&depthBuffHeapDesc, IID_PPV_ARGS(&m_depthBuffHeap));
+            */
         }
 
         void init_depth_buffer() {
-            init_depth_descriptor_heap();
+            depth_buffer.init(m_device, width, height);
+            // init_depth_descriptor_heap();
 
+            /*
             D3D12_HEAP_PROPERTIES heapProps = {
                 .Type = D3D12_HEAP_TYPE_DEFAULT,
                 .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -488,6 +560,7 @@ class painter {
 
             m_depthStencilView = m_depthBuffHeap->GetCPUDescriptorHandleForHeapStart();
             m_device->CreateDepthStencilView(m_depthBuffer.Get(), &view_desc, m_depthStencilView);
+            */
         }
 
         void init_const_buffer() {
@@ -877,7 +950,7 @@ class painter {
             m_commandList[m_frameIndex]->ResourceBarrier(1, &barrier);
 
             m_commandList[m_frameIndex]->OMSetRenderTargets(1, &m_rtvHandles[m_frameIndex], FALSE,
-                                                            &m_depthStencilView);
+                                                            &depth_buffer.get_view());
 
 
             constexpr static FLOAT blue[4] = {0, 0, 1, 1};
@@ -893,7 +966,8 @@ class painter {
 
 
             m_commandList[m_frameIndex]->ClearDepthStencilView(
-                m_depthStencilView, D3D12_CLEAR_FLAG_STENCIL | D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0,
+                depth_buffer.get_view(), D3D12_CLEAR_FLAG_STENCIL | D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0,
+                0,
                 nullptr);
 
             m_commandList[m_frameIndex]->IASetPrimitiveTopology(
