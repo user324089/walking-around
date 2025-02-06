@@ -110,9 +110,10 @@ class Vertex_buffer {
         ComPtr<ID3D12Resource> m_vertexBuffer;
         D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
         unsigned int m_vertex_count = 0;
+
     public:
         template <typename VERTEX_TYPE>
-        void init(ComPtr<ID3D12Device>& device, const std::vector<VERTEX_TYPE> &vertex_data) {
+        void init(ComPtr<ID3D12Device> &device, const std::vector<VERTEX_TYPE> &vertex_data) {
             m_vertex_count = vertex_data.size();
             unsigned int data_size = sizeof(VERTEX_TYPE) * m_vertex_count;
             // inits m_vertexBuffer and m_vertexBufferView
@@ -138,8 +139,8 @@ class Vertex_buffer {
             };
 
             device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                              D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                              IID_PPV_ARGS(&m_vertexBuffer));
+                                            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                            IID_PPV_ARGS(&m_vertexBuffer));
 
             void *vertex_memory;
             D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
@@ -152,14 +153,13 @@ class Vertex_buffer {
             m_vertexBufferView.SizeInBytes = data_size;
         }
 
-        D3D12_VERTEX_BUFFER_VIEW& get_view() {
+        D3D12_VERTEX_BUFFER_VIEW &get_view() {
             return m_vertexBufferView;
         }
 
         unsigned int get_vertex_count() {
             return m_vertex_count;
         }
-
 };
 
 class GPU_waiter {
@@ -167,15 +167,59 @@ class GPU_waiter {
         ComPtr<ID3D12Fence> m_fence;
         HANDLE m_fenceEvent;
         UINT64 m_fenceValue = 0;
+
     public:
-        void init(ComPtr<ID3D12Device>& device) {
+        void init(ComPtr<ID3D12Device> &device) {
             device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &m_fence);
         }
-        void wait(ComPtr<ID3D12CommandQueue>& command_queue) {
+
+        void wait(ComPtr<ID3D12CommandQueue> &command_queue) {
             command_queue->Signal(m_fence.Get(), m_fenceValue);
             m_fence->SetEventOnCompletion(m_fenceValue++, m_fenceEvent);
 
             WaitForSingleObject(m_fenceEvent, INFINITE);
+        }
+};
+
+class Const_Heaps {
+    private:
+
+        ComPtr<ID3D12DescriptorHeap> m_constBuffHeap;
+        unsigned int increment = 0;
+        D3D12_CPU_DESCRIPTOR_HANDLE cpu_handle = {};
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle = {};
+
+    public:
+        void init(ComPtr<ID3D12Device> &device, unsigned int number) {
+            D3D12_DESCRIPTOR_HEAP_DESC constBuffHeapDesc = {
+                .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+                .NumDescriptors = number,
+                .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+                .NodeMask = 0};
+
+            device->CreateDescriptorHeap(&constBuffHeapDesc, IID_PPV_ARGS(&m_constBuffHeap));
+
+            increment =
+                device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+            cpu_handle = m_constBuffHeap->GetCPUDescriptorHandleForHeapStart();
+            gpu_handle = m_constBuffHeap->GetGPUDescriptorHandleForHeapStart();
+        }
+
+        D3D12_CPU_DESCRIPTOR_HANDLE get_cpu_handle(unsigned int index) {
+            D3D12_CPU_DESCRIPTOR_HANDLE handle = cpu_handle;
+            handle.ptr += increment * index;
+            return handle;
+        }
+
+        D3D12_GPU_DESCRIPTOR_HANDLE get_gpu_handle(unsigned int index) {
+            D3D12_GPU_DESCRIPTOR_HANDLE handle = gpu_handle;
+            handle.ptr += increment * index;
+            return handle;
+        }
+
+        ID3D12DescriptorHeap *get_heap_ptr() {
+            return m_constBuffHeap.Get();
         }
 };
 
@@ -199,7 +243,7 @@ class painter {
         ComPtr<ID3D12CommandQueue> m_commandQueue;
         ComPtr<IDXGISwapChain3> m_swapChain;
         ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
-        ComPtr<ID3D12DescriptorHeap> m_constBuffHeap;
+        // ComPtr<ID3D12DescriptorHeap> m_constBuffHeap;
         ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
         ComPtr<ID3D12CommandAllocator> m_commandAllocator[FrameCount];
         ComPtr<ID3D12GraphicsCommandList> m_commandList[FrameCount];
@@ -209,6 +253,7 @@ class painter {
         ComPtr<ID3D12RootSignature> m_rootSignature;
         ComPtr<ID3D12PipelineState> m_pipelineState;
 
+        Const_Heaps const_heaps;
 
         Vertex_buffer cube_vertex_buffer;
 
@@ -523,7 +568,7 @@ class painter {
 
             std::vector<vertex_t> data = gen_data();
 
-            //m_numDataVertices = data.size();
+            // m_numDataVertices = data.size();
             return data;
         }
 
@@ -554,8 +599,7 @@ class painter {
             D3D12_CONSTANT_BUFFER_VIEW_DESC const_buffer_desc = {
                 .BufferLocation = m_constBuffer->GetGPUVirtualAddress(),
                 .SizeInBytes = const_buffer_size};
-            m_device->CreateConstantBufferView(
-                &const_buffer_desc, m_constBuffHeap->GetCPUDescriptorHandleForHeapStart());
+            m_device->CreateConstantBufferView(&const_buffer_desc, const_heaps.get_cpu_handle(0));
 
             D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
             m_constBuffer->Map(0, &zero_range, &m_const_buffer_memory);
@@ -565,7 +609,7 @@ class painter {
             set_root_signature();
             create_graphics_pipeline_state();
             cube_vertex_buffer.init(m_device, generate_data());
-            //init_vertex_buffer(generate_data());
+            // init_vertex_buffer(generate_data());
             init_const_buffer();
             depth_buffer.init(m_device, width, height);
         }
@@ -610,6 +654,7 @@ class painter {
         }
 
         void init_const_buffer_heap() {
+            /*
             D3D12_DESCRIPTOR_HEAP_DESC constBuffHeapDesc = {
                 .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
                 .NumDescriptors = 2,
@@ -617,6 +662,7 @@ class painter {
                 .NodeMask = 0};
 
             m_device->CreateDescriptorHeap(&constBuffHeapDesc, IID_PPV_ARGS(&m_constBuffHeap));
+            */
         }
 
         ComPtr<ID3D12Resource> texture_upload_buffer = nullptr;
@@ -759,15 +805,18 @@ class painter {
                               .PlaneSlice = 0,
                               .ResourceMinLODClamp = 0.0f},
             };
+            /*
             D3D12_CPU_DESCRIPTOR_HANDLE cpu_desc_handle =
                 m_constBuffHeap->GetCPUDescriptorHandleForHeapStart();
             cpu_desc_handle.ptr +=
                 m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            m_device->CreateShaderResourceView(texture_resource.Get(), &srv_desc, cpu_desc_handle);
+                */
+            m_device->CreateShaderResourceView(texture_resource.Get(), &srv_desc,
+                                               const_heaps.get_cpu_handle(1));
             OutputDebugStringA("\AFTER INIT TEXTURES--------\n");
 
             gpu_waiter.wait(m_commandQueue);
-            //wait_for_gpu();
+            // wait_for_gpu();
         }
 
         /*
@@ -799,7 +848,8 @@ class painter {
 
             init_command_queue();
             init_swap_chain();
-            init_const_buffer_heap();
+            const_heaps.init(m_device, 2);
+            // init_const_buffer_heap();
             {
                 D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
                 rtvHeapDesc.NumDescriptors = FrameCount;
@@ -839,7 +889,7 @@ class painter {
                 m_commandList[i]->Close();
             }
 
-            //m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &m_fence);
+            // m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &m_fence);
 
             gpu_waiter.init(m_device);
 
@@ -870,23 +920,15 @@ class painter {
 
             m_commandList[m_frameIndex]->SetGraphicsRootSignature(m_rootSignature.Get());
 
-            // m_commandList[m_frameIndex]->SetDescriptorHeaps(1, &m_constBuffHeap);
-            // //m_constBuffHeap
-            ID3D12DescriptorHeap *ppHeaps[] = {m_constBuffHeap.Get()};
-            m_commandList[m_frameIndex]->SetDescriptorHeaps(_countof(ppHeaps), ppHeaps);
-
-
-            D3D12_GPU_DESCRIPTOR_HANDLE gpu_desc_const_handle =
-                m_constBuffHeap->GetGPUDescriptorHandleForHeapStart();
-
-            m_commandList[m_frameIndex]->SetGraphicsRootDescriptorTable(0, gpu_desc_const_handle);
-            gpu_desc_const_handle.ptr +=
-                m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            m_commandList[m_frameIndex]->SetGraphicsRootDescriptorTable(1, gpu_desc_const_handle);
+            ID3D12DescriptorHeap *pHeaps = const_heaps.get_heap_ptr();
+            m_commandList[m_frameIndex]->SetDescriptorHeaps(1, &pHeaps);
 
 
             m_commandList[m_frameIndex]->SetGraphicsRootDescriptorTable(
-                0, m_constBuffHeap->GetGPUDescriptorHandleForHeapStart());
+                0, const_heaps.get_gpu_handle(0));
+            m_commandList[m_frameIndex]->SetGraphicsRootDescriptorTable(
+                1, const_heaps.get_gpu_handle(1));
+
 
             D3D12_VIEWPORT viewport = {
                 .TopLeftX = 0.0f,
@@ -932,8 +974,7 @@ class painter {
 
             m_commandList[m_frameIndex]->ClearDepthStencilView(
                 depth_buffer.get_view(), D3D12_CLEAR_FLAG_STENCIL | D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0,
-                0,
-                nullptr);
+                0, nullptr);
 
             m_commandList[m_frameIndex]->IASetPrimitiveTopology(
                 D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -963,7 +1004,7 @@ class painter {
             }
 
             gpu_waiter.wait(m_commandQueue);
-            //wait_for_gpu();
+            // wait_for_gpu();
 
 
             m_frameIndex ^= 1;
