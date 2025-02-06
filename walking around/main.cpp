@@ -162,6 +162,23 @@ class Vertex_buffer {
 
 };
 
+class GPU_waiter {
+    private:
+        ComPtr<ID3D12Fence> m_fence;
+        HANDLE m_fenceEvent;
+        UINT64 m_fenceValue = 0;
+    public:
+        void init(ComPtr<ID3D12Device>& device) {
+            device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &m_fence);
+        }
+        void wait(ComPtr<ID3D12CommandQueue>& command_queue) {
+            command_queue->Signal(m_fence.Get(), m_fenceValue);
+            m_fence->SetEventOnCompletion(m_fenceValue++, m_fenceEvent);
+
+            WaitForSingleObject(m_fenceEvent, INFINITE);
+        }
+};
+
 class painter {
     private:
 
@@ -186,33 +203,22 @@ class painter {
         ComPtr<ID3D12Resource> m_renderTargets[FrameCount];
         ComPtr<ID3D12CommandAllocator> m_commandAllocator[FrameCount];
         ComPtr<ID3D12GraphicsCommandList> m_commandList[FrameCount];
-        ComPtr<ID3D12Fence> m_fence;
 
-        // ComPtr<ID3D12DescriptorHeap> m_depthBuffHeap;
-        // ComPtr<ID3D12Resource> m_depthBuffer;
-
-        // D3D12_CPU_DESCRIPTOR_HANDLE m_depthStencilView;
         Depth_buffer depth_buffer;
 
         ComPtr<ID3D12RootSignature> m_rootSignature;
         ComPtr<ID3D12PipelineState> m_pipelineState;
 
 
-        //ComPtr<ID3D12Resource> m_vertexBuffer;
-        //D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
-
         Vertex_buffer cube_vertex_buffer;
 
         ComPtr<ID3D12Resource> m_constBuffer;
         void *m_const_buffer_memory;
 
-        HANDLE m_fenceEvent;
-        UINT64 m_fenceValue = 0;
+        GPU_waiter gpu_waiter;
 
         UINT m_rtvDescriptorSize;
         UINT m_frameIndex = 0;
-
-        //UINT m_numDataVertices = 0;
 
         D3D12_CPU_DESCRIPTOR_HANDLE m_rtvHandles[FrameCount];
 
@@ -760,9 +766,11 @@ class painter {
             m_device->CreateShaderResourceView(texture_resource.Get(), &srv_desc, cpu_desc_handle);
             OutputDebugStringA("\AFTER INIT TEXTURES--------\n");
 
-            wait_for_gpu();
+            gpu_waiter.wait(m_commandQueue);
+            //wait_for_gpu();
         }
 
+        /*
         void wait_for_gpu() {
 
             m_commandQueue->Signal(m_fence.Get(), m_fenceValue);
@@ -770,6 +778,7 @@ class painter {
 
             WaitForSingleObject(m_fenceEvent, INFINITE);
         }
+        */
 
     public:
         painter() {}
@@ -830,7 +839,9 @@ class painter {
                 m_commandList[i]->Close();
             }
 
-            m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &m_fence);
+            //m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, __uuidof(ID3D12Fence), &m_fence);
+
+            gpu_waiter.init(m_device);
 
             load_assets();
 
@@ -951,7 +962,8 @@ class painter {
                 throw 1;
             }
 
-            wait_for_gpu();
+            gpu_waiter.wait(m_commandQueue);
+            //wait_for_gpu();
 
 
             m_frameIndex ^= 1;
