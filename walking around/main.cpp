@@ -105,6 +105,63 @@ class Depth_buffer {
         }
 };
 
+class Vertex_buffer {
+    private:
+        ComPtr<ID3D12Resource> m_vertexBuffer;
+        D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+        unsigned int m_vertex_count = 0;
+    public:
+        template <typename VERTEX_TYPE>
+        void init(ComPtr<ID3D12Device>& device, const std::vector<VERTEX_TYPE> &vertex_data) {
+            m_vertex_count = vertex_data.size();
+            unsigned int data_size = sizeof(VERTEX_TYPE) * m_vertex_count;
+            // inits m_vertexBuffer and m_vertexBufferView
+            D3D12_HEAP_PROPERTIES heapProps = {
+                .Type = D3D12_HEAP_TYPE_UPLOAD,
+                .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+                .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+                .CreationNodeMask = 1,
+                .VisibleNodeMask = 1,
+            };
+
+            D3D12_RESOURCE_DESC desc = {
+                .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+                .Alignment = 0,
+                .Width = data_size, //  VERTEX_BUFFER_SIZE,
+                .Height = 1,
+                .DepthOrArraySize = 1,
+                .MipLevels = 1,
+                .Format = DXGI_FORMAT_UNKNOWN,
+                .SampleDesc = {.Count = 1, .Quality = 0},
+                .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+                .Flags = D3D12_RESOURCE_FLAG_NONE
+            };
+
+            device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+                                              D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                              IID_PPV_ARGS(&m_vertexBuffer));
+
+            void *vertex_memory;
+            D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
+            m_vertexBuffer->Map(0, &zero_range, &vertex_memory);
+            std::memcpy(vertex_memory, vertex_data.data(), data_size);
+            m_vertexBuffer->Unmap(0, nullptr);
+
+            m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
+            m_vertexBufferView.StrideInBytes = sizeof(VERTEX_TYPE);
+            m_vertexBufferView.SizeInBytes = data_size;
+        }
+
+        D3D12_VERTEX_BUFFER_VIEW& get_view() {
+            return m_vertexBufferView;
+        }
+
+        unsigned int get_vertex_count() {
+            return m_vertex_count;
+        }
+
+};
+
 class painter {
     private:
 
@@ -139,8 +196,12 @@ class painter {
 
         ComPtr<ID3D12RootSignature> m_rootSignature;
         ComPtr<ID3D12PipelineState> m_pipelineState;
-        ComPtr<ID3D12Resource> m_vertexBuffer;
-        D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+
+
+        //ComPtr<ID3D12Resource> m_vertexBuffer;
+        //D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
+
+        Vertex_buffer cube_vertex_buffer;
 
         ComPtr<ID3D12Resource> m_constBuffer;
         void *m_const_buffer_memory;
@@ -151,7 +212,7 @@ class painter {
         UINT m_rtvDescriptorSize;
         UINT m_frameIndex = 0;
 
-        UINT m_numDataVertices = 0;
+        //UINT m_numDataVertices = 0;
 
         D3D12_CPU_DESCRIPTOR_HANDLE m_rtvHandles[FrameCount];
 
@@ -268,9 +329,7 @@ class painter {
 
             D3D12_STATIC_SAMPLER_DESC tex_sampler_desc = {
                 .Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-                // D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_FILTER_ANISOTROPIC
                 .AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-                //_MODE_MIRROR, _MODE_CLAMP, _MODE_BORDER
                 .AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                 .AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP,
                 .MipLODBias = 0,
@@ -458,109 +517,8 @@ class painter {
 
             std::vector<vertex_t> data = gen_data();
 
-            m_numDataVertices = data.size();
+            //m_numDataVertices = data.size();
             return data;
-        }
-
-        void init_vertex_buffer(const std::vector<vertex_t> &vertex_data) {
-
-            unsigned int data_size = sizeof(vertex_t) * vertex_data.size();
-            // inits m_vertexBuffer and m_vertexBufferView
-            D3D12_HEAP_PROPERTIES heapProps = {
-                .Type = D3D12_HEAP_TYPE_UPLOAD,
-                .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-                .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-                .CreationNodeMask = 1,
-                .VisibleNodeMask = 1,
-
-            };
-
-            D3D12_RESOURCE_DESC desc = {
-                .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-                .Alignment = 0,
-                .Width = data_size, //  VERTEX_BUFFER_SIZE,
-                .Height = 1,
-                .DepthOrArraySize = 1,
-                .MipLevels = 1,
-                .Format = DXGI_FORMAT_UNKNOWN,
-                .SampleDesc = {.Count = 1, .Quality = 0},
-                .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-                .Flags = D3D12_RESOURCE_FLAG_NONE
-            };
-
-            m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                              D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                              IID_PPV_ARGS(&m_vertexBuffer));
-
-            void *vertex_memory;
-            D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
-            m_vertexBuffer->Map(0, &zero_range, &vertex_memory);
-            std::memcpy(vertex_memory, vertex_data.data(), data_size);
-            m_vertexBuffer->Unmap(0, nullptr);
-
-            m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
-            m_vertexBufferView.StrideInBytes = sizeof(vertex_t);
-            m_vertexBufferView.SizeInBytes = data_size;
-        }
-
-        void init_depth_descriptor_heap() {
-            /*
-            D3D12_DESCRIPTOR_HEAP_DESC depthBuffHeapDesc = {
-                .Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
-                .NumDescriptors = 1,
-                .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
-                .NodeMask = 0,
-            };
-
-            m_device->CreateDescriptorHeap(&depthBuffHeapDesc, IID_PPV_ARGS(&m_depthBuffHeap));
-            */
-        }
-
-        void init_depth_buffer() {
-            depth_buffer.init(m_device, width, height);
-            // init_depth_descriptor_heap();
-
-            /*
-            D3D12_HEAP_PROPERTIES heapProps = {
-                .Type = D3D12_HEAP_TYPE_DEFAULT,
-                .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-                .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-                .CreationNodeMask = 1,
-                .VisibleNodeMask = 1,
-
-            };
-
-            D3D12_RESOURCE_DESC desc = {
-                .Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D,
-                .Alignment = 0,
-                .Width = width,
-                .Height = height,
-                .DepthOrArraySize = 1,
-                .MipLevels = 0,
-                .Format = DXGI_FORMAT_D32_FLOAT,
-                .SampleDesc = {.Count = 1, .Quality = 0},
-                .Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN,
-                .Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL
-            };
-
-            D3D12_CLEAR_VALUE clear_val = {
-                .Format = DXGI_FORMAT_D32_FLOAT, .DepthStencil = {.Depth = 1.0f, .Stencil = 0}
-            };
-
-            m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                              D3D12_RESOURCE_STATE_DEPTH_WRITE, &clear_val,
-                                              IID_PPV_ARGS(&m_depthBuffer));
-
-
-            D3D12_DEPTH_STENCIL_VIEW_DESC view_desc{.Format = DXGI_FORMAT_D32_FLOAT,
-                                                    .ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D,
-                                                    .Flags = D3D12_DSV_FLAG_NONE,
-                                                    .Texture2D = {}};
-
-
-            m_depthStencilView = m_depthBuffHeap->GetCPUDescriptorHandleForHeapStart();
-            m_device->CreateDepthStencilView(m_depthBuffer.Get(), &view_desc, m_depthStencilView);
-            */
         }
 
         void init_const_buffer() {
@@ -600,9 +558,10 @@ class painter {
         void load_assets() {
             set_root_signature();
             create_graphics_pipeline_state();
-            init_vertex_buffer(generate_data());
+            cube_vertex_buffer.init(m_device, generate_data());
+            //init_vertex_buffer(generate_data());
             init_const_buffer();
-            init_depth_buffer();
+            depth_buffer.init(m_device, width, height);
         }
 
         void init_debug_layer() {
@@ -892,14 +851,9 @@ class painter {
 
             recalculate_matrix(time);
 
-            std::wstringstream w;
-            w << "hello: " << time << "\n";
-            OutputDebugString(w.str().c_str());
             HRESULT hr;
 
-            OutputDebugStringA("resetting command allocator------------\n");
             m_commandAllocator[m_frameIndex]->Reset();
-            OutputDebugStringA("reset command allocator-------------\n");
             m_commandList[m_frameIndex]->Reset(m_commandAllocator[m_frameIndex].Get(),
                                                m_pipelineState.Get());
 
@@ -972,8 +926,9 @@ class painter {
 
             m_commandList[m_frameIndex]->IASetPrimitiveTopology(
                 D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            m_commandList[m_frameIndex]->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-            m_commandList[m_frameIndex]->DrawInstanced(m_numDataVertices, 1, 0, 0); // HERE?
+            m_commandList[m_frameIndex]->IASetVertexBuffers(0, 1, &cube_vertex_buffer.get_view());
+            m_commandList[m_frameIndex]->DrawInstanced(cube_vertex_buffer.get_vertex_count(), 1, 0,
+                                                       0);
 
             barrier.Transition.pResource = m_renderTargets[m_frameIndex].Get();
             barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
