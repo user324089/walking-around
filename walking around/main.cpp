@@ -21,8 +21,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 constexpr UINT BMP_PX_SIZE = 4;
 
-constexpr unsigned int const_buffer_size = 256;
-
 struct vs_const_buffer_t {
         DirectX::XMFLOAT4X4 matWorldViewProj;
         DirectX::XMFLOAT4X4 matWorldViewInvT;
@@ -436,9 +434,17 @@ class Const_buffer {
     private:
         ComPtr<ID3D12Resource> m_constBuffer;
         void *memory;
+
+        unsigned int find_larger_256_divisible(unsigned int size) {
+            unsigned int masked_left = size & (~255);
+            bool masked_right = size & 255;
+            return masked_left + masked_right * 256;
+        }
     public:
 
-        void init(ComPtr<ID3D12Device> &device, const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+        void init(ComPtr<ID3D12Device> &device, unsigned int size, const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+
+            size = find_larger_256_divisible(size);
             D3D12_HEAP_PROPERTIES heapProps = {.Type = D3D12_HEAP_TYPE_UPLOAD,
                                                .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
                                                .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
@@ -448,7 +454,7 @@ class Const_buffer {
             D3D12_RESOURCE_DESC desc = {
                 .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
                 .Alignment = 0,
-                .Width = const_buffer_size, //  size of const buffer, must be divisible by 256
+                .Width = size, //  size of const buffer, must be divisible by 256
                 .Height = 1,
                 .DepthOrArraySize = 1,
                 .MipLevels = 1,
@@ -465,7 +471,7 @@ class Const_buffer {
 
             D3D12_CONSTANT_BUFFER_VIEW_DESC const_buffer_desc = {
                 .BufferLocation = m_constBuffer->GetGPUVirtualAddress(),
-                .SizeInBytes = const_buffer_size};
+                .SizeInBytes = size};
             device->CreateConstantBufferView(&const_buffer_desc, cpu_handle);
 
             D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
@@ -785,17 +791,11 @@ class painter {
             return cube_data;
         }
 
-        std::vector<vertex_t> generate_data() {
-
-            std::vector<vertex_t> data = gen_data();
-            return data;
-        }
-
         void load_assets() {
             set_root_signature();
             create_graphics_pipeline_state();
             cube_vertex_buffer.init(m_device, gen_data());
-            matrix_buffer.init(m_device, const_heaps.get_cpu_handle(0));
+            matrix_buffer.init(m_device, sizeof(vs_const_buffer_t), const_heaps.get_cpu_handle(0));
             depth_buffer.init(m_device, width, height);
         }
 
@@ -844,20 +844,6 @@ class painter {
             smile_texture =
                 texture_loader.load_texture(m_device, LR"(C:\Users\user157\Downloads\smile.png)",
                                             const_heaps.get_cpu_handle(1));
-            /*
-            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-            CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                             __uuidof(IWICImagingFactory),
-                             reinterpret_cast<LPVOID *>(&m_wic_factory));
-
-            UINT m_bmp_width, m_bmp_height;
-            BYTE *m_bmp_bits;
-            LoadBitmapFromFile(LR"(C:\Users\user157\Downloads\smile.png)", m_bmp_width,
-                               m_bmp_height, &m_bmp_bits);
-
-            smile_texture.init(m_device, m_bmp_width, m_bmp_height, m_bmp_bits,
-                               const_heaps.get_cpu_handle(1));
-                               */
         }
 
     public:
