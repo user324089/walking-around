@@ -174,8 +174,10 @@ class GPU_waiter {
         }
 
         void wait(ComPtr<ID3D12CommandQueue> &command_queue) {
+            m_fenceValue++;
+
             command_queue->Signal(m_fence.Get(), m_fenceValue);
-            m_fence->SetEventOnCompletion(m_fenceValue++, m_fenceEvent);
+            m_fence->SetEventOnCompletion(m_fenceValue, m_fenceEvent);
 
             WaitForSingleObject(m_fenceEvent, INFINITE);
         }
@@ -609,7 +611,6 @@ class painter {
             set_root_signature();
             create_graphics_pipeline_state();
             cube_vertex_buffer.init(m_device, generate_data());
-            // init_vertex_buffer(generate_data());
             init_const_buffer();
             depth_buffer.init(m_device, width, height);
         }
@@ -653,18 +654,6 @@ class painter {
             m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue));
         }
 
-        void init_const_buffer_heap() {
-            /*
-            D3D12_DESCRIPTOR_HEAP_DESC constBuffHeapDesc = {
-                .Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-                .NumDescriptors = 2,
-                .Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
-                .NodeMask = 0};
-
-            m_device->CreateDescriptorHeap(&constBuffHeapDesc, IID_PPV_ARGS(&m_constBuffHeap));
-            */
-        }
-
         ComPtr<ID3D12Resource> texture_upload_buffer = nullptr;
 
         void init_textures() { // assumes command list and pipeline state object are created
@@ -703,7 +692,7 @@ class painter {
                 D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture_resource)));
 
             // Budowa pomocniczego bufora wczytania do GPU
-            // ComPtr<ID3D12Resource> texture_upload_buffer = nullptr; TODO change back to local
+            ComPtr<ID3D12Resource> texture_upload_buffer = nullptr;// TODO change back to local
 
             // - ustalenie rozmiaru tego pom. bufora
             // i danych o podzasobach tekstury (liczbie linii i ich
