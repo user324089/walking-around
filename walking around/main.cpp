@@ -432,6 +432,51 @@ class Texture_loader {
         }
 };
 
+class Const_buffer {
+    private:
+        ComPtr<ID3D12Resource> m_constBuffer;
+        void *memory;
+    public:
+
+        void init(ComPtr<ID3D12Device> &device, const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+            D3D12_HEAP_PROPERTIES heapProps = {.Type = D3D12_HEAP_TYPE_UPLOAD,
+                                               .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+                                               .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+                                               .CreationNodeMask = 1,
+                                               .VisibleNodeMask = 1};
+
+            D3D12_RESOURCE_DESC desc = {
+                .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
+                .Alignment = 0,
+                .Width = const_buffer_size, //  size of const buffer, must be divisible by 256
+                .Height = 1,
+                .DepthOrArraySize = 1,
+                .MipLevels = 1,
+                .Format = DXGI_FORMAT_UNKNOWN,
+                .SampleDesc = {.Count = 1, .Quality = 0},
+                .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+                .Flags = D3D12_RESOURCE_FLAG_NONE,
+            };
+
+
+            device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+                                              D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                              IID_PPV_ARGS(&m_constBuffer));
+
+            D3D12_CONSTANT_BUFFER_VIEW_DESC const_buffer_desc = {
+                .BufferLocation = m_constBuffer->GetGPUVirtualAddress(),
+                .SizeInBytes = const_buffer_size};
+            device->CreateConstantBufferView(&const_buffer_desc, cpu_handle);
+
+            D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
+            m_constBuffer->Map(0, &zero_range, &memory);
+        }
+
+        void* data() {
+            return memory;
+        }
+};
+
 class painter {
     private:
 
@@ -465,8 +510,9 @@ class painter {
 
         Vertex_buffer cube_vertex_buffer;
 
-        ComPtr<ID3D12Resource> m_constBuffer;
-        void *m_const_buffer_memory;
+        //ComPtr<ID3D12Resource> m_constBuffer;
+        //void *m_const_buffer_memory;
+        Const_buffer matrix_buffer;
 
         GPU_waiter gpu_waiter;
 
@@ -520,7 +566,7 @@ class painter {
             buff.colLight = {1.0f, 0.5f, 0.5f, 1.0f};
             buff.dirLight = {1.0f, 1.0f, 1.0f, 0.0f};
 
-            memcpy(m_const_buffer_memory, &buff, sizeof(buff));
+            memcpy(matrix_buffer.data(), &buff, sizeof(buff));
         }
 
         void set_root_signature() {
@@ -742,49 +788,14 @@ class painter {
         std::vector<vertex_t> generate_data() {
 
             std::vector<vertex_t> data = gen_data();
-
-            // m_numDataVertices = data.size();
             return data;
-        }
-
-        void init_const_buffer() {
-            D3D12_HEAP_PROPERTIES heapProps = {.Type = D3D12_HEAP_TYPE_UPLOAD,
-                                               .CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-                                               .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
-                                               .CreationNodeMask = 1,
-                                               .VisibleNodeMask = 1};
-
-            D3D12_RESOURCE_DESC desc = {
-                .Dimension = D3D12_RESOURCE_DIMENSION_BUFFER,
-                .Alignment = 0,
-                .Width = const_buffer_size, //  size of const buffer, must be divisible by 256
-                .Height = 1,
-                .DepthOrArraySize = 1,
-                .MipLevels = 1,
-                .Format = DXGI_FORMAT_UNKNOWN,
-                .SampleDesc = {.Count = 1, .Quality = 0},
-                .Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-                .Flags = D3D12_RESOURCE_FLAG_NONE,
-            };
-
-            m_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                              D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                              IID_PPV_ARGS(&m_constBuffer));
-
-            D3D12_CONSTANT_BUFFER_VIEW_DESC const_buffer_desc = {
-                .BufferLocation = m_constBuffer->GetGPUVirtualAddress(),
-                .SizeInBytes = const_buffer_size};
-            m_device->CreateConstantBufferView(&const_buffer_desc, const_heaps.get_cpu_handle(0));
-
-            D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
-            m_constBuffer->Map(0, &zero_range, &m_const_buffer_memory);
         }
 
         void load_assets() {
             set_root_signature();
             create_graphics_pipeline_state();
-            cube_vertex_buffer.init(m_device, generate_data());
-            init_const_buffer();
+            cube_vertex_buffer.init(m_device, gen_data());
+            matrix_buffer.init(m_device, const_heaps.get_cpu_handle(0));
             depth_buffer.init(m_device, width, height);
         }
 
