@@ -231,7 +231,7 @@ class Texture {
 
     public:
         void init(ComPtr<ID3D12Device> &device, unsigned int width, unsigned int height, BYTE *data,
-                  const D3D12_CPU_DESCRIPTOR_HANDLE& cpu_handle) {
+                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
 
             ComPtr<ID3D12CommandQueue> command_queue;
             ComPtr<ID3D12CommandAllocator> command_allocator;
@@ -244,13 +244,11 @@ class Texture {
             device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&command_queue));
 
             device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                             IID_PPV_ARGS(&command_allocator));
-            device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                        command_allocator.Get(), nullptr,
-                                        IID_PPV_ARGS(&command_list));
-            
+                                           IID_PPV_ARGS(&command_allocator));
+            device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, command_allocator.Get(),
+                                      nullptr, IID_PPV_ARGS(&command_list));
 
-            
+
             // Budowa właściwego zasobu tekstury
             D3D12_HEAP_PROPERTIES tex_heap_prop = {
                 .Type = D3D12_HEAP_TYPE_DEFAULT,
@@ -317,8 +315,7 @@ class Texture {
             // - skopiowanie danych tekstury do pom. bufora
             D3D12_SUBRESOURCE_DATA texture_data = {.pData = data,
                                                    .RowPitch = width * BMP_PX_SIZE,
-                                                   .SlicePitch =
-                                                       width * height * BMP_PX_SIZE};
+                                                   .SlicePitch = width * height * BMP_PX_SIZE};
             // ... ID3D12GraphicsCommandList::Reset() - to dlatego lista
             // poleceń i obiekt stanu potoku muszą być wcześniej utworzone
 
@@ -377,14 +374,62 @@ class Texture {
                               .PlaneSlice = 0,
                               .ResourceMinLODClamp = 0.0f},
             };
-            device->CreateShaderResourceView(texture_resource.Get(), &srv_desc,
-                                               cpu_handle);
+            device->CreateShaderResourceView(texture_resource.Get(), &srv_desc, cpu_handle);
 
             GPU_waiter gpu_waiter;
             gpu_waiter.init(device);
             gpu_waiter.wait(command_queue);
         }
+};
 
+class Texture_loader {
+    private:
+        IWICImagingFactory *m_wic_factory;
+
+        void LoadBitmapFromFile(PCWSTR uri, UINT &width, UINT &height, BYTE **ppBits) {
+            ComPtr<IWICBitmapDecoder> pDecoder = nullptr;
+            ComPtr<IWICBitmapFrameDecode> pSource = nullptr;
+            ComPtr<IWICFormatConverter> pConverter = nullptr;
+
+            m_wic_factory->CreateDecoderFromFilename(
+                uri, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, pDecoder.GetAddressOf());
+
+
+            pDecoder->GetFrame(0, pSource.GetAddressOf());
+
+            m_wic_factory->CreateFormatConverter(pConverter.GetAddressOf());
+
+
+            pConverter->Initialize(pSource.Get(), GUID_WICPixelFormat32bppRGBA,
+                                   WICBitmapDitherTypeNone, nullptr, 0.0f,
+                                   WICBitmapPaletteTypeMedianCut);
+
+            pConverter->GetSize(&width, &height);
+
+
+            *ppBits = new BYTE[4 * width * height];
+
+            pConverter->CopyPixels(nullptr, 4 * width, 4 * width * height, *ppBits);
+        }
+
+    public:
+        void init() {
+            CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+            CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                             __uuidof(IWICImagingFactory),
+                             reinterpret_cast<LPVOID *>(&m_wic_factory));
+        }
+
+        Texture load_texture(ComPtr<ID3D12Device> &device, PCWSTR uri,
+                             const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+            UINT m_bmp_width, m_bmp_height;
+            BYTE *m_bmp_bits;
+            LoadBitmapFromFile(uri, m_bmp_width, m_bmp_height, &m_bmp_bits);
+
+            Texture result;
+            result.init(device, m_bmp_width, m_bmp_height, m_bmp_bits, cpu_handle);
+            return result;
+        }
 };
 
 class painter {
@@ -433,43 +478,9 @@ class painter {
         std::chrono::high_resolution_clock::time_point start_point =
             std::chrono::high_resolution_clock::now();
 
-        IWICImagingFactory *m_wic_factory;
-
-        //UINT m_bmp_width, m_bmp_height;
-        //BYTE *m_bmp_bits;
-
-        //ComPtr<ID3D12Resource> texture_resource;
+        Texture_loader texture_loader;
         Texture smile_texture;
 
-        HRESULT LoadBitmapFromFile(PCWSTR uri, UINT &width, UINT &height, BYTE **ppBits) {
-            HRESULT hr;
-            ComPtr<IWICBitmapDecoder> pDecoder = nullptr;
-            ComPtr<IWICBitmapFrameDecode> pSource = nullptr;
-            ComPtr<IWICFormatConverter> pConverter = nullptr;
-
-            hr = m_wic_factory->CreateDecoderFromFilename(
-                uri, nullptr, GENERIC_READ, WICDecodeMetadataCacheOnLoad, pDecoder.GetAddressOf());
-
-            if (SUCCEEDED(hr)) {
-                hr = pDecoder->GetFrame(0, pSource.GetAddressOf());
-            }
-            if (SUCCEEDED(hr)) {
-                hr = m_wic_factory->CreateFormatConverter(pConverter.GetAddressOf());
-            }
-            if (SUCCEEDED(hr)) {
-                hr = pConverter->Initialize(pSource.Get(), GUID_WICPixelFormat32bppRGBA,
-                                            WICBitmapDitherTypeNone, nullptr, 0.0f,
-                                            WICBitmapPaletteTypeMedianCut);
-            }
-            if (SUCCEEDED(hr)) {
-                hr = pConverter->GetSize(&width, &height);
-            }
-            if (SUCCEEDED(hr)) {
-                *ppBits = new BYTE[4 * width * height];
-                hr = pConverter->CopyPixels(nullptr, 4 * width, 4 * width * height, *ppBits);
-            }
-            return hr;
-        }
 
         double get_time() {
             std::chrono::high_resolution_clock::time_point now_point =
@@ -816,9 +827,13 @@ class painter {
             m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue));
         }
 
-        void init_textures() { // assumes command list and pipeline state object are created
+        void init_textures() {
 
-            OutputDebugStringA("\nBEGIN INIT TEXTURES--------\n");
+            texture_loader.init();
+            smile_texture =
+                texture_loader.load_texture(m_device, LR"(C:\Users\user157\Downloads\smile.png)",
+                                            const_heaps.get_cpu_handle(1));
+            /*
             CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
             CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
                              __uuidof(IWICImagingFactory),
@@ -831,9 +846,9 @@ class painter {
 
             smile_texture.init(m_device, m_bmp_width, m_bmp_height, m_bmp_bits,
                                const_heaps.get_cpu_handle(1));
-
+                               */
         }
-        
+
     public:
         painter() {}
 
