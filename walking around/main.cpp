@@ -9,7 +9,10 @@
 #include <wrl.h>
 #include <wincodec.h>
 #include <source_location>
-
+#include <fstream>
+#include <string>
+#include <algorithm>
+#include <array>
 
 #include "pixel_shader.h"
 #include "vertex_shader.h"
@@ -317,7 +320,7 @@ class Texture {
             // ... ID3D12GraphicsCommandList::Reset() - to dlatego lista
             // poleceń i obiekt stanu potoku muszą być wcześniej utworzone
 
-            command_list->Reset(command_allocator.Get(), nullptr); // TODO is this reset necessary
+            //command_list->Reset(command_allocator.Get(), nullptr); // TODO is this reset necessary
 
             UINT8 *map_tex_data = nullptr;
             check_output(
@@ -483,6 +486,73 @@ class Const_buffer {
         }
 };
 
+class Object {
+    private:
+        struct vertex_t {
+            public:
+                FLOAT position[3];
+                FLOAT normal[3];
+                FLOAT color[4];
+                FLOAT tex_coord[2];
+        };
+
+        Texture texture;
+        Vertex_buffer vertex_buffer;
+    public:
+
+        void init(ComPtr<ID3D12Device> &device, Texture_loader& texture_loader, PCWSTR texture_filename, PCWSTR obj_filename,
+                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+            texture = texture_loader.load_texture(device, texture_filename, cpu_handle); 
+            
+            std::vector<std::array<float, 3>> vertex_coords;
+            std::vector<std::array<float, 3>> normals;
+            std::vector<std::array<float, 2>> tex_coords;
+
+            std::vector<vertex_t> vertices;
+
+            std::ifstream obj_file(obj_filename);
+            std::string current_line;
+            while (std::getline(obj_file, current_line)) {
+                std::replace(current_line.begin(), current_line.end(), '/', ' ');
+                std::stringstream line_stream(current_line);
+                std::string current_token;
+                line_stream >> current_token;
+                if (current_token == "v") {
+                    std::array<float, 3> coords;
+                    line_stream >> coords[0] >> coords[1] >> coords[2];
+                    vertex_coords.push_back(coords);
+                } else if (current_token == "vt") {
+                    std::array<float, 2> coords;
+                    line_stream >> coords[0] >> coords[1];
+                    tex_coords.push_back(coords);
+                } else if (current_token == "vn") {
+                    std::array<float, 3> coords;
+                    line_stream >> coords[0] >> coords[1] >> coords[2];
+                    normals.push_back(coords);
+                } else if (current_token == "f") {
+                    for (unsigned int i = 0; i < 3; i++) {
+                        vertex_t current_vertex;
+                        unsigned int v_index, vt_index, vn_index;
+                        line_stream >> v_index >> vt_index >> vn_index;
+                        std::array<float, 3> &coords = vertex_coords[v_index - 1];
+                        std::array<float, 3> &normal = normals[vn_index - 1];
+                        std::array<float, 2> &tex = tex_coords[vt_index - 1];
+                        std::copy(coords.begin(), coords.end(), current_vertex.position);
+                        std::copy(normal.begin(), normal.end(), current_vertex.normal);
+                        std::copy(tex.begin(), tex.end(), current_vertex.tex_coord);
+                        vertices.push_back(current_vertex);
+                    }
+                }
+            }
+            vertex_buffer.init(device, vertices);
+        }
+
+        void draw(ComPtr<ID3D12GraphicsCommandList>& command_list) {
+            command_list->IASetVertexBuffers(0, 1, &vertex_buffer.get_view());
+            command_list->DrawInstanced(vertex_buffer.get_vertex_count(), 1, 0, 0);
+        }
+};
+
 class painter {
     private:
 
@@ -514,7 +584,7 @@ class painter {
 
         Const_Heaps const_heaps;
 
-        Vertex_buffer cube_vertex_buffer;
+        //Vertex_buffer cube_vertex_buffer;
 
         //ComPtr<ID3D12Resource> m_constBuffer;
         //void *m_const_buffer_memory;
@@ -532,6 +602,8 @@ class painter {
 
         Texture_loader texture_loader;
         Texture smile_texture;
+
+        Object house_object;
 
 
         double get_time() {
@@ -794,7 +866,9 @@ class painter {
         void load_assets() {
             set_root_signature();
             create_graphics_pipeline_state();
-            cube_vertex_buffer.init(m_device, gen_data());
+            //cube_vertex_buffer.init(m_device, gen_data());
+            house_object.init(m_device, texture_loader, LR"(resources/house.png)",
+                              LR"(resources/house.wobj)", const_heaps.get_cpu_handle(1));
             matrix_buffer.init(m_device, sizeof(vs_const_buffer_t), const_heaps.get_cpu_handle(0));
             depth_buffer.init(m_device, width, height);
         }
@@ -838,13 +912,15 @@ class painter {
             m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue));
         }
 
+        /*
         void init_textures() {
 
             texture_loader.init();
             smile_texture =
-                texture_loader.load_texture(m_device, LR"(C:\Users\user157\Downloads\smile.png)",
+                texture_loader.load_texture(m_device, LR"(resources/house.png)",
                                             const_heaps.get_cpu_handle(1));
         }
+        */
 
     public:
         painter() {}
@@ -908,8 +984,9 @@ class painter {
 
             gpu_waiter.init(m_device);
 
+            texture_loader.init();
+            //init_textures();
             load_assets();
-            init_textures();
         }
 
         void release() {}
@@ -992,9 +1069,14 @@ class painter {
 
             m_commandList[m_frameIndex]->IASetPrimitiveTopology(
                 D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+
+            /*
             m_commandList[m_frameIndex]->IASetVertexBuffers(0, 1, &cube_vertex_buffer.get_view());
             m_commandList[m_frameIndex]->DrawInstanced(cube_vertex_buffer.get_vertex_count(), 1, 0,
                                                        0);
+                                                       */
+            house_object.draw(m_commandList[m_frameIndex]);
 
             barrier.Transition.pResource = m_renderTargets[m_frameIndex].Get();
             barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
