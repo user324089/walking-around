@@ -25,9 +25,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 constexpr UINT BMP_PX_SIZE = 4;
 
 struct vs_const_buffer_t {
-        DirectX::XMFLOAT4X4 matWorldViewProj;
-        DirectX::XMFLOAT4X4 matWorldViewInvT;
+        DirectX::XMFLOAT4X4 matWorld[10];
         DirectX::XMFLOAT4X4 matView;
+        DirectX::XMFLOAT4X4 matProj;
         DirectX::XMFLOAT4 colMaterial, colLight, dirLight, padding;
 };
 
@@ -320,7 +320,8 @@ class Texture {
             // ... ID3D12GraphicsCommandList::Reset() - to dlatego lista
             // poleceń i obiekt stanu potoku muszą być wcześniej utworzone
 
-            //command_list->Reset(command_allocator.Get(), nullptr); // TODO is this reset necessary
+            // command_list->Reset(command_allocator.Get(), nullptr); // TODO is this reset
+            // necessary
 
             UINT8 *map_tex_data = nullptr;
             check_output(
@@ -443,9 +444,11 @@ class Const_buffer {
             bool masked_right = size & 255;
             return masked_left + masked_right * 256;
         }
+
     public:
 
-        void init(ComPtr<ID3D12Device> &device, unsigned int size, const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+        void init(ComPtr<ID3D12Device> &device, unsigned int size,
+                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
 
             size = find_larger_256_divisible(size);
             D3D12_HEAP_PROPERTIES heapProps = {.Type = D3D12_HEAP_TYPE_UPLOAD,
@@ -469,19 +472,18 @@ class Const_buffer {
 
 
             device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                              D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                              IID_PPV_ARGS(&m_constBuffer));
+                                            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                            IID_PPV_ARGS(&m_constBuffer));
 
             D3D12_CONSTANT_BUFFER_VIEW_DESC const_buffer_desc = {
-                .BufferLocation = m_constBuffer->GetGPUVirtualAddress(),
-                .SizeInBytes = size};
+                .BufferLocation = m_constBuffer->GetGPUVirtualAddress(), .SizeInBytes = size};
             device->CreateConstantBufferView(&const_buffer_desc, cpu_handle);
 
             D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
             m_constBuffer->Map(0, &zero_range, &memory);
         }
 
-        void* data() {
+        void *data() {
             return memory;
         }
 };
@@ -492,18 +494,20 @@ class Object {
             public:
                 FLOAT position[3];
                 FLOAT normal[3];
-                FLOAT color[4];
                 FLOAT tex_coord[2];
+                UINT mat_index;
         };
 
         Texture texture;
         Vertex_buffer vertex_buffer;
+
     public:
 
-        void init(ComPtr<ID3D12Device> &device, Texture_loader& texture_loader, PCWSTR texture_filename, PCWSTR obj_filename,
+        void init(ComPtr<ID3D12Device> &device, Texture_loader &texture_loader,
+                  PCWSTR texture_filename, PCWSTR obj_filename,
                   const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
-            texture = texture_loader.load_texture(device, texture_filename, cpu_handle); 
-            
+            texture = texture_loader.load_texture(device, texture_filename, cpu_handle);
+
             std::vector<std::array<float, 3>> vertex_coords;
             std::vector<std::array<float, 3>> normals;
             std::vector<std::array<float, 2>> tex_coords;
@@ -540,6 +544,7 @@ class Object {
                         std::copy(coords.begin(), coords.end(), current_vertex.position);
                         std::copy(normal.begin(), normal.end(), current_vertex.normal);
                         std::copy(tex.begin(), tex.end(), current_vertex.tex_coord);
+                        current_vertex.mat_index = 1;
                         vertices.push_back(current_vertex);
                     }
                 }
@@ -547,7 +552,7 @@ class Object {
             vertex_buffer.init(device, vertices);
         }
 
-        void draw(ComPtr<ID3D12GraphicsCommandList>& command_list) {
+        void draw(ComPtr<ID3D12GraphicsCommandList> &command_list) {
             command_list->IASetVertexBuffers(0, 1, &vertex_buffer.get_view());
             command_list->DrawInstanced(vertex_buffer.get_vertex_count(), 1, 0, 0);
         }
@@ -555,14 +560,6 @@ class Object {
 
 class painter {
     private:
-
-        struct vertex_t {
-            public:
-                FLOAT position[3];
-                FLOAT normal[3];
-                FLOAT color[4];
-                FLOAT tex_coord[2];
-        };
 
         UINT width = 0, height = 0;
         HWND hwnd = 0;
@@ -584,10 +581,10 @@ class painter {
 
         Const_Heaps const_heaps;
 
-        //Vertex_buffer cube_vertex_buffer;
+        // Vertex_buffer cube_vertex_buffer;
 
-        //ComPtr<ID3D12Resource> m_constBuffer;
-        //void *m_const_buffer_memory;
+        // ComPtr<ID3D12Resource> m_constBuffer;
+        // void *m_const_buffer_memory;
         Const_buffer matrix_buffer;
 
         GPU_waiter gpu_waiter;
@@ -605,7 +602,6 @@ class painter {
 
         Object house_object;
 
-
         double get_time() {
             std::chrono::high_resolution_clock::time_point now_point =
                 std::chrono::high_resolution_clock::now();
@@ -620,26 +616,27 @@ class painter {
             DirectX::XMMATRIX world, view, proj;
 
             world = DirectX::XMMatrixMultiply(
-                DirectX::XMMatrixRotationY(2.5f * angle), // zmienna angle zmienia się
-                // o 1 / 64 co ok. 15 ms
+                DirectX::XMMatrixRotationY(2.5f * angle),
                 DirectX::XMMatrixRotationX(static_cast<FLOAT>(sin(angle)) / 2.0f));
 
             view = DirectX::XMMatrixTranslation(0.0f, 0.0f, 4.0f);
 
             proj = DirectX::XMMatrixPerspectiveFovLH(45.0f, width / height, 1.0f, 100.0f);
 
-            DirectX::XMMATRIX world_view = DirectX::XMMatrixMultiply(world, view);
-            DirectX::XMMATRIX world_view_proj = DirectX::XMMatrixMultiply(world_view, proj);
-
             view = XMMatrixTranspose(view);
-            world_view = XMMatrixTranspose(world_view);
-            world_view_proj = XMMatrixTranspose(world_view_proj);
+            world = XMMatrixTranspose(world);
+            proj = XMMatrixTranspose(proj);
+
+            DirectX::XMMATRIX alternative = DirectX::XMMatrixTranslation(0.5f, 0.0f, 0.0f);
+            alternative = XMMatrixTranspose(alternative);
 
             vs_const_buffer_t buff;
 
-            XMStoreFloat4x4(&buff.matWorldViewProj, world_view_proj);
-            XMStoreFloat4x4(&buff.matWorldViewInvT, world_view); // DUE TO ORTHOGONAL MATRIX
+            XMStoreFloat4x4(&buff.matWorld[0], world);
+            XMStoreFloat4x4(&buff.matWorld[1], alternative);
+
             XMStoreFloat4x4(&buff.matView, view);
+            XMStoreFloat4x4(&buff.matProj, proj);
 
             buff.colLight = {1.0f, 0.5f, 0.5f, 1.0f};
             buff.dirLight = {1.0f, 1.0f, 1.0f, 0.0f};
@@ -718,34 +715,34 @@ class painter {
         void create_graphics_pipeline_state() {
 
             D3D12_INPUT_ELEMENT_DESC input_elements[] = {
-                {.SemanticName = "POSITION",
+                { .SemanticName = "POSITION",
                  .SemanticIndex = 0,
                  .Format = DXGI_FORMAT_R32G32B32_FLOAT,
                  .InputSlot = 0,
                  .AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT,
                  .InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
                  .InstanceDataStepRate = 0},
-                {  .SemanticName = "NORMAL",
+                {   .SemanticName = "NORMAL",
                  .SemanticIndex = 0,
                  .Format = DXGI_FORMAT_R32G32B32_FLOAT,
                  .InputSlot = 0,
                  .AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT,
                  .InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
                  .InstanceDataStepRate = 0},
-                {   .SemanticName = "COLOR",
-                 .SemanticIndex = 0,
-                 .Format = DXGI_FORMAT_R32G32B32A32_FLOAT,
-                 .InputSlot = 0,
-                 .AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT,
-                 .InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
-                 .InstanceDataStepRate = 0},
-                {.SemanticName = "TEXCOORD",
+                { .SemanticName = "TEXCOORD",
                  .SemanticIndex = 0,
                  .Format = DXGI_FORMAT_R32G32_FLOAT,
                  .InputSlot = 0,
                  .AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT,
                  .InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
-                 .InstanceDataStepRate = 0}
+                 .InstanceDataStepRate = 0},
+                {.SemanticName = "MAT_INDEX",
+                 .SemanticIndex = 0,
+                 .Format = DXGI_FORMAT_R32_UINT,
+                 .InputSlot = 0,
+                 .AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT,
+                 .InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+                 .InstanceDataStepRate = 0},
             };
 
             D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc = {
@@ -811,62 +808,10 @@ class painter {
             m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState));
         }
 
-        std::vector<vertex_t> gen_data() {
-            std::vector<vertex_t> cube_data = {
-                {{-1, -1, -1}, {0, 0, -1}, {1, 0, 0, 1}, {0, 0}}, // back
-                { {-1, 1, -1}, {0, 0, -1}, {1, 0, 0, 1}, {0, 1}},
-                { {1, -1, -1}, {0, 0, -1}, {1, 0, 0, 1}, {1, 0}},
-                { {1, -1, -1}, {0, 0, -1}, {1, 0, 0, 1}, {1, 0}},
-                { {-1, 1, -1}, {0, 0, -1}, {1, 0, 0, 1}, {0, 1}},
-                {  {1, 1, -1}, {0, 0, -1}, {1, 0, 0, 1}, {1, 1}},
-
-
-                { {-1, -1, 1},  {0, 0, 1}, {1, 0, 0, 1}, {0, 0}}, // front
-                {  {1, -1, 1},  {0, 0, 1}, {1, 0, 0, 1}, {1, 0}},
-                {  {-1, 1, 1},  {0, 0, 1}, {1, 0, 0, 1}, {0, 1}},
-                {  {-1, 1, 1},  {0, 0, 1}, {1, 0, 0, 1}, {0, 1}},
-                {  {1, -1, 1},  {0, 0, 1}, {1, 0, 0, 1}, {1, 0}},
-                {   {1, 1, 1},  {0, 0, 1}, {1, 0, 0, 1}, {1, 1}},
-
-
-                { {1, -1, -1},  {1, 0, 0}, {1, 0, 0, 1}, {0, 0}}, // right
-                {  {1, 1, -1},  {1, 0, 0}, {1, 0, 0, 1}, {1, 0}},
-                {  {1, -1, 1},  {1, 0, 0}, {1, 0, 0, 1}, {0, 1}},
-                {  {1, -1, 1},  {1, 0, 0}, {1, 0, 0, 1}, {0, 1}},
-                {  {1, 1, -1},  {1, 0, 0}, {1, 0, 0, 1}, {1, 0}},
-                {   {1, 1, 1},  {1, 0, 0}, {1, 0, 0, 1}, {1, 1}},
-
-
-                {{-1, -1, -1}, {-1, 0, 0}, {1, 0, 0, 1}, {0, 0}}, // left
-                { {-1, -1, 1}, {-1, 0, 0}, {1, 0, 0, 1}, {0, 1}},
-                { {-1, 1, -1}, {-1, 0, 0}, {1, 0, 0, 1}, {1, 0}},
-                { {-1, 1, -1}, {-1, 0, 0}, {1, 0, 0, 1}, {1, 0}},
-                { {-1, -1, 1}, {-1, 0, 0}, {1, 0, 0, 1}, {0, 1}},
-                {  {-1, 1, 1}, {-1, 0, 0}, {1, 0, 0, 1}, {1, 1}},
-
-
-                { {-1, 1, -1},  {0, 1, 0}, {1, 0, 0, 1}, {0, 0}}, // up
-                {  {-1, 1, 1},  {0, 1, 0}, {1, 0, 0, 1}, {0, 1}},
-                {  {1, 1, -1},  {0, 1, 0}, {1, 0, 0, 1}, {1, 0}},
-                {  {1, 1, -1},  {0, 1, 0}, {1, 0, 0, 1}, {1, 0}},
-                {  {-1, 1, 1},  {0, 1, 0}, {1, 0, 0, 1}, {0, 1}},
-                {   {1, 1, 1},  {0, 1, 0}, {1, 0, 0, 1}, {1, 1}},
-
-
-                {{-1, -1, -1}, {0, -1, 0}, {1, 0, 0, 1}, {0, 0}}, // down
-                { {1, -1, -1}, {0, -1, 0}, {1, 0, 0, 1}, {1, 0}},
-                { {-1, -1, 1}, {0, -1, 0}, {1, 0, 0, 1}, {0, 1}},
-                { {-1, -1, 1}, {0, -1, 0}, {1, 0, 0, 1}, {0, 1}},
-                { {1, -1, -1}, {0, -1, 0}, {1, 0, 0, 1}, {1, 0}},
-                {  {1, -1, 1}, {0, -1, 0}, {1, 0, 0, 1}, {1, 1}},
-            };
-            return cube_data;
-        }
-
         void load_assets() {
             set_root_signature();
             create_graphics_pipeline_state();
-            //cube_vertex_buffer.init(m_device, gen_data());
+            // cube_vertex_buffer.init(m_device, gen_data());
             house_object.init(m_device, texture_loader, LR"(resources/house.png)",
                               LR"(resources/house.wobj)", const_heaps.get_cpu_handle(1));
             matrix_buffer.init(m_device, sizeof(vs_const_buffer_t), const_heaps.get_cpu_handle(0));
@@ -985,7 +930,7 @@ class painter {
             gpu_waiter.init(m_device);
 
             texture_loader.init();
-            //init_textures();
+            // init_textures();
             load_assets();
         }
 
