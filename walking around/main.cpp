@@ -509,7 +509,6 @@ class Id_giver {
             s << "\n------------IDs----------\n";
             for (auto [a, b] : str_to_id) {
                 s << a << " " << b << "\n";
-                
             }
             OutputDebugStringA(s.str().c_str());
         }
@@ -570,7 +569,6 @@ class Object {
                     unsigned int current_gid =
                         id_giver.get_id(current_object_name + "." + current_group_name);
 
-                    
 
                     for (unsigned int i = 0; i < 3; i++) {
                         vertex_t current_vertex;
@@ -579,7 +577,6 @@ class Object {
                         if (current_gid != off_gid) {
                             vertex_groups[v_index - 1] = current_gid;
                         }
-                            
                     }
                 } else if (current_token == "o") {
                     line_stream >> current_object_name;
@@ -612,12 +609,11 @@ class Object {
                         std::copy(normal.begin(), normal.end(), current_vertex.normal);
                         std::copy(tex.begin(), tex.end(), current_vertex.tex_coord);
 
-                        current_vertex.mat_index = vertex_groups[v_index-1];
+                        current_vertex.mat_index = vertex_groups[v_index - 1];
 
                         vertices.push_back(current_vertex);
                     }
                 }
-                
             }
             vertex_buffer.init(device, vertices);
         }
@@ -630,17 +626,99 @@ class Object {
 
 class Player {
     private:
-        float x = 0, z = -4;
+        float x = 0, z = 0;
+        constexpr static float y = 2, camera_back_dist = 3;
         float angle = 0;
-    public:
-        void init() {
+        float velocity_x_forward = 0, velocity_x_backward = 0, velocity_z_forward = 0,
+              velocity_z_backward = 0, angular_velocity_left = 0, angular_velocity_right = 0;
 
+    public:
+        void init() {}
+
+        void key_down(WPARAM key_code) {
+            switch (key_code) {
+                case 'W':
+                    velocity_z_forward = 1;
+                    return;
+                case 'S':
+                    velocity_z_backward = 1;
+                    return;
+                case 'A':
+                    velocity_x_backward = 1;
+                    return;
+                case 'D':
+                    velocity_x_forward = 1;
+                    return;
+                case VK_LEFT:
+                    angular_velocity_left = 1;
+                    return;
+                case VK_RIGHT:
+                    angular_velocity_right = 1;
+                    return;
+            }
         }
 
-        void fill_const_buffer(vs_const_buffer_t& buffer) {
-            DirectX::XMMATRIX view;
-            view = DirectX::XMMatrixTranslation(-x, 0.0f, -z);
+        void key_up(WPARAM key_code) {
+            switch (key_code) {
+                case 'W':
+                    velocity_z_forward = 0;
+                    return;
+                case 'S':
+                    velocity_z_backward = 0;
+                    return;
+                case 'A':
+                    velocity_x_backward = 0;
+                    return;
+                case 'D':
+                    velocity_x_forward = 0;
+                    return;
+                case VK_LEFT:
+                    angular_velocity_left = 0;
+                    return;
+                case VK_RIGHT:
+                    angular_velocity_right = 0;
+                    return;
+            }
+        }
 
+        void update(float delta_time) {
+
+            float velocity_z = velocity_z_forward - velocity_z_backward;
+            float velocity_x = velocity_x_forward - velocity_x_backward;
+            float angular_velocity = angular_velocity_left - angular_velocity_right;
+
+            std::stringstream s;
+            s << "IN UPDATE: " << delta_time << " " << velocity_x << "\n";
+            OutputDebugStringA(s.str().c_str());
+
+            float sin_angle = std::sin(angle), cos_angle = std::cos(angle);
+            float forward_x = -sin_angle, forward_z = cos_angle;
+            float left_x = cos_angle, left_z = sin_angle;
+
+            x += (left_x * velocity_x + forward_x * velocity_z) * delta_time;
+            z += (forward_z * velocity_z + left_z * velocity_x) * delta_time;
+
+            angle += angular_velocity * delta_time;
+            if (angle > 2 * std::numbers::pi_v<float>) {
+                angle -= 2 * std::numbers::pi_v<float>;
+            } else if (angle < -2 * std::numbers::pi_v<float>) {
+                angle += 2 * std::numbers::pi_v<float>;
+            }
+        }
+
+        void fill_const_buffer(vs_const_buffer_t &buffer) {
+
+            float forward_x = -std::sin(angle), forward_z = std::cos(angle);
+
+            DirectX::XMMATRIX view;
+
+            view = DirectX::XMMatrixMultiply(DirectX::XMMatrixRotationY(angle),
+                                             DirectX::XMMatrixRotationX(-0.4));
+            view = DirectX::XMMatrixMultiply(
+
+                DirectX::XMMatrixTranslation(-x + forward_x * camera_back_dist, -y,
+                                             -z + forward_z * camera_back_dist),
+                view);
 
             view = XMMatrixTranspose(view);
             XMStoreFloat4x4(&buffer.matView, view);
@@ -685,6 +763,8 @@ class painter {
 
         std::chrono::high_resolution_clock::time_point start_point =
             std::chrono::high_resolution_clock::now();
+        std::chrono::high_resolution_clock::time_point prev_time_point =
+            std::chrono::high_resolution_clock::now();
 
         Texture_loader texture_loader;
         Texture smile_texture;
@@ -693,6 +773,16 @@ class painter {
         Id_giver object_id_giver;
 
         Player player;
+
+        double get_delta_time() {
+            std::chrono::high_resolution_clock::time_point now_point =
+                std::chrono::high_resolution_clock::now();
+            double microseconds_passed =
+                std::chrono::duration_cast<std::chrono::microseconds>(now_point - prev_time_point)
+                    .count();
+            prev_time_point = now_point;
+            return microseconds_passed / 1'000'000;
+        }
 
         double get_time() {
             std::chrono::high_resolution_clock::time_point now_point =
@@ -705,32 +795,33 @@ class painter {
 
         void recalculate_matrix(double angle) {
 
-            DirectX::XMMATRIX world, view, proj;
+            DirectX::XMMATRIX world, proj;
 
             world = DirectX::XMMatrixMultiply(
                 DirectX::XMMatrixRotationY(2.5f * angle),
                 DirectX::XMMatrixRotationX(static_cast<FLOAT>(sin(angle)) / 2.0f));
 
-            view = DirectX::XMMatrixTranslation(0.0f, 0.0f, 4.0f);
+            // view = DirectX::XMMatrixTranslation(0.0f, 0.0f, 4.0f);
 
-            proj = DirectX::XMMatrixPerspectiveFovLH(45.0f, width / height, 1.0f, 100.0f);
+            proj = DirectX::XMMatrixPerspectiveFovLH(45.0f, width / height, 0.1f, 100.0f);
 
-            view = XMMatrixTranspose(view);
+
             world = XMMatrixTranspose(world);
             proj = XMMatrixTranspose(proj);
 
-            DirectX::XMMATRIX alternative = DirectX::XMMatrixTranslation(0.0f, 2.0f, 0.0f);
+            DirectX::XMMATRIX alternative = DirectX::XMMatrixTranslation(0.0f, 0.0f, 0.0f);
             alternative = XMMatrixTranspose(alternative);
 
             vs_const_buffer_t buff;
+
+            player.fill_const_buffer(buff);
 
             // XMStoreFloat4x4(&buff.matWorld[0], world);
             for (unsigned int i = 0; i < 10; i++) {
                 XMStoreFloat4x4(&buff.matWorld[i], alternative);
             }
-            XMStoreFloat4x4(&buff.matWorld[object_id_giver.get_id("person.right_leg")], world);
+            // XMStoreFloat4x4(&buff.matWorld[object_id_giver.get_id("person.right_leg")], world);
 
-            XMStoreFloat4x4(&buff.matView, view);
             XMStoreFloat4x4(&buff.matProj, proj);
 
             buff.colLight = {1.0f, 0.5f, 0.5f, 1.0f};
@@ -954,16 +1045,6 @@ class painter {
             m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue));
         }
 
-        /*
-        void init_textures() {
-
-            texture_loader.init();
-            smile_texture =
-                texture_loader.load_texture(m_device, LR"(resources/house.png)",
-                                            const_heaps.get_cpu_handle(1));
-        }
-        */
-
     public:
         painter() {}
 
@@ -984,7 +1065,6 @@ class painter {
             init_command_queue();
             init_swap_chain();
             const_heaps.init(m_device, 2);
-            // init_const_buffer_heap();
             {
                 D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
                 rtvHeapDesc.NumDescriptors = FrameCount;
@@ -1036,6 +1116,21 @@ class painter {
         void resize(UINT _width, UINT _height) {
             width = _width;
             height = _height;
+        }
+
+        void update() {
+            float delta_time = get_delta_time();
+            player.update(delta_time);
+        }
+
+        void key_down(WPARAM key_code, LPARAM flags) {
+            if (!(flags & KF_REPEAT)) {
+                player.key_down(key_code);
+            }
+        }
+
+        void key_up(WPARAM key_code, LPARAM flags) {
+            player.key_up(key_code);
         }
 
         void paint() {
@@ -1094,8 +1189,8 @@ class painter {
 
 
             constexpr static FLOAT yellow[4] = {1, 0, 1, 1};
-            m_commandList[m_frameIndex]->ClearRenderTargetView(m_rtvHandles[m_frameIndex], yellow, 0,
-                                                               nullptr);
+            m_commandList[m_frameIndex]->ClearRenderTargetView(m_rtvHandles[m_frameIndex], yellow,
+                                                               0, nullptr);
 
 
             m_commandList[m_frameIndex]->ClearDepthStencilView(
@@ -1183,6 +1278,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdShow
                 DispatchMessage(&msg);
             }
         } else {
+            msg.message = WM_USER;
+            DispatchMessage(&msg);
             InvalidateRect(hwnd, nullptr, false);
         }
     } while (msg.message != WM_QUIT);
@@ -1209,11 +1306,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             PostQuitMessage(0);
             return 0;
+        case WM_KEYDOWN:
+            pnt.key_down(wParam, lParam);
+            return 0;
+        case WM_KEYUP:
+            pnt.key_up(wParam, lParam);
+            return 0;
+
         case WM_PAINT:
 
             pnt.paint();
 
             ValidateRect(hwnd, nullptr);
+            return 0;
+
+        case WM_USER:
+            pnt.update();
             return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
