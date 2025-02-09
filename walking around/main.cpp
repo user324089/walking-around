@@ -16,6 +16,8 @@
 
 #include "pixel_shader.h"
 #include "vertex_shader.h"
+#include <map>
+#include <set>
 
 
 using namespace Microsoft::WRL;
@@ -488,6 +490,31 @@ class Const_buffer {
         }
 };
 
+class Id_giver {
+    private:
+        unsigned int given_id = 0;
+        std::map<std::string, unsigned int> str_to_id;
+
+    public:
+        unsigned int get_id(const std::string &str) {
+            auto found = str_to_id.find(str);
+            if (found == str_to_id.end()) {
+                return (str_to_id[str] = given_id++);
+            }
+            return found->second;
+        }
+
+        void write() {
+            std::stringstream s;
+            s << "\n------------IDs----------\n";
+            for (auto [a, b] : str_to_id) {
+                s << a << " " << b << "\n";
+                
+            }
+            OutputDebugStringA(s.str().c_str());
+        }
+};
+
 class Object {
     private:
         struct vertex_t {
@@ -505,14 +532,19 @@ class Object {
 
         void init(ComPtr<ID3D12Device> &device, Texture_loader &texture_loader,
                   PCWSTR texture_filename, PCWSTR obj_filename,
-                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle, Id_giver &id_giver) {
             texture = texture_loader.load_texture(device, texture_filename, cpu_handle);
 
             std::vector<std::array<float, 3>> vertex_coords;
+            std::vector<unsigned int> vertex_groups;
             std::vector<std::array<float, 3>> normals;
             std::vector<std::array<float, 2>> tex_coords;
 
-            std::vector<vertex_t> vertices;
+
+            std::string current_object_name;
+            std::string current_group_name = "off";
+
+            unsigned int off_gid;
 
             std::ifstream obj_file(obj_filename);
             std::string current_line;
@@ -525,6 +557,7 @@ class Object {
                     std::array<float, 3> coords;
                     line_stream >> coords[0] >> coords[1] >> coords[2];
                     vertex_coords.push_back(coords);
+                    vertex_groups.push_back(off_gid);
                 } else if (current_token == "vt") {
                     std::array<float, 2> coords;
                     line_stream >> coords[0] >> coords[1];
@@ -534,6 +567,40 @@ class Object {
                     line_stream >> coords[0] >> coords[1] >> coords[2];
                     normals.push_back(coords);
                 } else if (current_token == "f") {
+                    unsigned int current_gid =
+                        id_giver.get_id(current_object_name + "." + current_group_name);
+
+                    
+
+                    for (unsigned int i = 0; i < 3; i++) {
+                        vertex_t current_vertex;
+                        unsigned int v_index, vt_index, vn_index;
+                        line_stream >> v_index >> vt_index >> vn_index;
+                        if (current_gid != off_gid) {
+                            vertex_groups[v_index - 1] = current_gid;
+                        }
+                            
+                    }
+                } else if (current_token == "o") {
+                    line_stream >> current_object_name;
+                    off_gid = id_giver.get_id(current_object_name + ".off");
+                } else if (current_token == "g") {
+                    line_stream >> current_group_name;
+                }
+            }
+            obj_file.clear();
+            obj_file.seekg(0, std::ios::beg);
+
+            std::vector<vertex_t> vertices;
+
+            while (std::getline(obj_file, current_line)) {
+
+                std::replace(current_line.begin(), current_line.end(), '/', ' ');
+                std::stringstream line_stream(current_line);
+                std::string current_token;
+                line_stream >> current_token;
+
+                if (current_token == "f") {
                     for (unsigned int i = 0; i < 3; i++) {
                         vertex_t current_vertex;
                         unsigned int v_index, vt_index, vn_index;
@@ -544,10 +611,13 @@ class Object {
                         std::copy(coords.begin(), coords.end(), current_vertex.position);
                         std::copy(normal.begin(), normal.end(), current_vertex.normal);
                         std::copy(tex.begin(), tex.end(), current_vertex.tex_coord);
-                        current_vertex.mat_index = 1;
+
+                        current_vertex.mat_index = vertex_groups[v_index-1];
+
                         vertices.push_back(current_vertex);
                     }
                 }
+                
             }
             vertex_buffer.init(device, vertices);
         }
@@ -555,6 +625,25 @@ class Object {
         void draw(ComPtr<ID3D12GraphicsCommandList> &command_list) {
             command_list->IASetVertexBuffers(0, 1, &vertex_buffer.get_view());
             command_list->DrawInstanced(vertex_buffer.get_vertex_count(), 1, 0, 0);
+        }
+};
+
+class Player {
+    private:
+        float x = 0, z = -4;
+        float angle = 0;
+    public:
+        void init() {
+
+        }
+
+        void fill_const_buffer(vs_const_buffer_t& buffer) {
+            DirectX::XMMATRIX view;
+            view = DirectX::XMMatrixTranslation(-x, 0.0f, -z);
+
+
+            view = XMMatrixTranspose(view);
+            XMStoreFloat4x4(&buffer.matView, view);
         }
 };
 
@@ -601,6 +690,9 @@ class painter {
         Texture smile_texture;
 
         Object house_object;
+        Id_giver object_id_giver;
+
+        Player player;
 
         double get_time() {
             std::chrono::high_resolution_clock::time_point now_point =
@@ -627,13 +719,16 @@ class painter {
             world = XMMatrixTranspose(world);
             proj = XMMatrixTranspose(proj);
 
-            DirectX::XMMATRIX alternative = DirectX::XMMatrixTranslation(0.5f, 0.0f, 0.0f);
+            DirectX::XMMATRIX alternative = DirectX::XMMatrixTranslation(0.0f, 2.0f, 0.0f);
             alternative = XMMatrixTranspose(alternative);
 
             vs_const_buffer_t buff;
 
-            XMStoreFloat4x4(&buff.matWorld[0], world);
-            XMStoreFloat4x4(&buff.matWorld[1], alternative);
+            // XMStoreFloat4x4(&buff.matWorld[0], world);
+            for (unsigned int i = 0; i < 10; i++) {
+                XMStoreFloat4x4(&buff.matWorld[i], alternative);
+            }
+            XMStoreFloat4x4(&buff.matWorld[object_id_giver.get_id("person.right_leg")], world);
 
             XMStoreFloat4x4(&buff.matView, view);
             XMStoreFloat4x4(&buff.matProj, proj);
@@ -812,8 +907,10 @@ class painter {
             set_root_signature();
             create_graphics_pipeline_state();
             // cube_vertex_buffer.init(m_device, gen_data());
-            house_object.init(m_device, texture_loader, LR"(resources/house.png)",
-                              LR"(resources/house.wobj)", const_heaps.get_cpu_handle(1));
+            house_object.init(m_device, texture_loader, LR"(resources/person.png)",
+                              LR"(resources/person.wobj)", const_heaps.get_cpu_handle(1),
+                              object_id_giver);
+            object_id_giver.write();
             matrix_buffer.init(m_device, sizeof(vs_const_buffer_t), const_heaps.get_cpu_handle(0));
             depth_buffer.init(m_device, width, height);
         }
@@ -996,15 +1093,8 @@ class painter {
                                                             &depth_buffer.get_view());
 
 
-            constexpr static FLOAT blue[4] = {0, 0, 1, 1};
             constexpr static FLOAT yellow[4] = {1, 0, 1, 1};
-            const FLOAT *color;
-            if (static_cast<int>(time) % 2 == 0) {
-                color = blue;
-            } else {
-                color = yellow;
-            }
-            m_commandList[m_frameIndex]->ClearRenderTargetView(m_rtvHandles[m_frameIndex], color, 0,
+            m_commandList[m_frameIndex]->ClearRenderTargetView(m_rtvHandles[m_frameIndex], yellow, 0,
                                                                nullptr);
 
 
@@ -1017,9 +1107,10 @@ class painter {
 
 
             /*
-            m_commandList[m_frameIndex]->IASetVertexBuffers(0, 1, &cube_vertex_buffer.get_view());
-            m_commandList[m_frameIndex]->DrawInstanced(cube_vertex_buffer.get_vertex_count(), 1, 0,
-                                                       0);
+            m_commandList[m_frameIndex]->IASetVertexBuffers(0, 1,
+            &cube_vertex_buffer.get_view());
+            m_commandList[m_frameIndex]->DrawInstanced(cube_vertex_buffer.get_vertex_count(),
+            1, 0, 0);
                                                        */
             house_object.draw(m_commandList[m_frameIndex]);
 

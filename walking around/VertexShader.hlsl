@@ -12,6 +12,7 @@ struct vs_output_t
 {
     float4 position : SV_POSITION;
     float2 tex : TEXCOORD;
+    float3 norm : NORMAL_PS;
 };
 
 vs_output_t main(
@@ -24,6 +25,7 @@ vs_output_t main(
     float4 NW = mul(float4(norm, 0.0f), matWorld[mat_index]);
     result.position = mul(mul(mul(float4(pos, 1.0f), matWorld[mat_index]), matView), matProj);
     result.tex = tex;
+    result.norm = NW;
 
     return result;
 }
