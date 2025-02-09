@@ -31,7 +31,7 @@ struct vs_const_buffer_t {
         DirectX::XMFLOAT4X4 matWorld[10];
         DirectX::XMFLOAT4X4 matView;
         DirectX::XMFLOAT4X4 matProj;
-        DirectX::XMFLOAT4 colMaterial, colLight, dirLight, padding;
+        DirectX::XMFLOAT4 colLight, dirLight;
 };
 
 void check_output(HRESULT res, std::source_location loc = std::source_location::current()) {
@@ -688,7 +688,7 @@ class Player {
         float time = 0;
         float x = 0, z = 0;
         constexpr static float y = 3, camera_back_dist = 3;
-        constexpr static float viewing_down_angle = -0.7;
+        constexpr static float viewing_down_angle = -0.8;
         float angle = 0;
         float velocity_x_forward = 0, velocity_x_backward = 0, velocity_z_forward = 0,
               velocity_z_backward = 0, angular_velocity_left = 0, angular_velocity_right = 0;
@@ -715,10 +715,10 @@ class Player {
 
         DirectX::XMMATRIX rotate_by_y_pivot(float pivot, float rotation) {
             DirectX::XMMATRIX rotation_matrix = DirectX::XMMatrixTranslation(0, -pivot, 0);
+            rotation_matrix =
+                DirectX::XMMatrixMultiply(rotation_matrix, DirectX::XMMatrixRotationX(rotation));
             rotation_matrix = DirectX::XMMatrixMultiply(rotation_matrix,
-                                                        DirectX::XMMatrixRotationX(rotation));
-            rotation_matrix = DirectX::XMMatrixMultiply(
-                rotation_matrix, DirectX::XMMatrixTranslation(0, pivot, 0));
+                                                        DirectX::XMMatrixTranslation(0, pivot, 0));
             return rotation_matrix;
         }
 
@@ -958,8 +958,8 @@ class painter {
 
             XMStoreFloat4x4(&buff.matProj, proj);
 
-            buff.colLight = {1.0f, 0.5f, 0.5f, 1.0f};
-            buff.dirLight = {1.0f, 1.0f, 1.0f, 0.0f};
+            buff.colLight = {1.0f, 1.0f, 1.0f, 1.0f};
+            buff.dirLight = {1, 1, 1, 0.0f};
 
             memcpy(matrix_buffer.data(), &buff, sizeof(buff));
         }
@@ -988,10 +988,10 @@ class painter {
             D3D12_ROOT_PARAMETER root_signature_params[] = {
                 {.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
                  .DescriptorTable = {1, &root_signature_ranges[0]},
-                 .ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX},
+                 .ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL  },
                 {.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
                  .DescriptorTable = {1, &root_signature_ranges[1]},
-                 .ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL }
+                 .ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL}
             };
 
             D3D12_STATIC_SAMPLER_DESC tex_sampler_desc = {
