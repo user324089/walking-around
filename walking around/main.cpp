@@ -13,6 +13,7 @@
 #include <string>
 #include <algorithm>
 #include <array>
+#include <limits>
 
 #include "pixel_shader.h"
 #include "vertex_shader.h"
@@ -232,9 +233,14 @@ class Texture {
     private:
         ComPtr<ID3D12Resource> texture_resource;
 
+        D3D12_GPU_DESCRIPTOR_HANDLE gpu_handle;
+
     public:
         void init(ComPtr<ID3D12Device> &device, unsigned int width, unsigned int height, BYTE *data,
-                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle,
+                  const D3D12_GPU_DESCRIPTOR_HANDLE &_gpu_handle) {
+
+            gpu_handle = _gpu_handle;
 
             ComPtr<ID3D12CommandQueue> command_queue;
             ComPtr<ID3D12CommandAllocator> command_allocator;
@@ -384,6 +390,10 @@ class Texture {
             gpu_waiter.init(device);
             gpu_waiter.wait(command_queue);
         }
+
+        void use(ComPtr<ID3D12GraphicsCommandList> &command_list, unsigned int arg_num) {
+            command_list->SetGraphicsRootDescriptorTable(arg_num, gpu_handle);
+        }
 };
 
 class Texture_loader {
@@ -425,13 +435,14 @@ class Texture_loader {
         }
 
         Texture load_texture(ComPtr<ID3D12Device> &device, PCWSTR uri,
-                             const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+                             const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle,
+                             const D3D12_GPU_DESCRIPTOR_HANDLE &gpu_handle) {
             UINT m_bmp_width, m_bmp_height;
             BYTE *m_bmp_bits;
             LoadBitmapFromFile(uri, m_bmp_width, m_bmp_height, &m_bmp_bits);
 
             Texture result;
-            result.init(device, m_bmp_width, m_bmp_height, m_bmp_bits, cpu_handle);
+            result.init(device, m_bmp_width, m_bmp_height, m_bmp_bits, cpu_handle, gpu_handle);
             return result;
         }
 };
@@ -504,6 +515,8 @@ class Id_giver {
             return found->second;
         }
 
+        constexpr static unsigned int no_id = (std::numeric_limits<unsigned int>::max)();
+
         void write() {
             std::stringstream s;
             s << "\n------------IDs----------\n";
@@ -527,15 +540,23 @@ class Object {
         Texture texture;
         Vertex_buffer vertex_buffer;
 
+        std::map<unsigned int, std::array<float, 3>> id_to_pivot_point;
+
     public:
+
+        const std::array<float, 3> &get_pivot(unsigned int id) {
+            return id_to_pivot_point[id];
+        }
 
         void init(ComPtr<ID3D12Device> &device, Texture_loader &texture_loader,
                   PCWSTR texture_filename, PCWSTR obj_filename,
-                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle, Id_giver &id_giver) {
-            texture = texture_loader.load_texture(device, texture_filename, cpu_handle);
+                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle,
+                  const D3D12_GPU_DESCRIPTOR_HANDLE &gpu_handle, Id_giver &id_giver) {
+            texture = texture_loader.load_texture(device, texture_filename, cpu_handle, gpu_handle);
 
             std::vector<std::array<float, 3>> vertex_coords;
             std::vector<unsigned int> vertex_groups;
+            std::vector<bool> is_pivot;
             std::vector<std::array<float, 3>> normals;
             std::vector<std::array<float, 2>> tex_coords;
 
@@ -543,7 +564,7 @@ class Object {
             std::string current_object_name;
             std::string current_group_name = "off";
 
-            unsigned int off_gid;
+            unsigned int off_gid = Id_giver::no_id;
 
             std::ifstream obj_file(obj_filename);
             std::string current_line;
@@ -556,7 +577,8 @@ class Object {
                     std::array<float, 3> coords;
                     line_stream >> coords[0] >> coords[1] >> coords[2];
                     vertex_coords.push_back(coords);
-                    vertex_groups.push_back(off_gid);
+                    vertex_groups.push_back(Id_giver::no_id); // unused id
+                    is_pivot.push_back(false);
                 } else if (current_token == "vt") {
                     std::array<float, 2> coords;
                     line_stream >> coords[0] >> coords[1];
@@ -574,7 +596,12 @@ class Object {
                         vertex_t current_vertex;
                         unsigned int v_index, vt_index, vn_index;
                         line_stream >> v_index >> vt_index >> vn_index;
-                        if (current_gid != off_gid) {
+                        if (vertex_groups[v_index - 1] != Id_giver::no_id
+                            && vertex_groups[v_index - 1] != current_gid) {
+                            is_pivot[v_index - 1] = true;
+                        }
+                        if (vertex_groups[v_index - 1] == Id_giver::no_id
+                            || current_gid != off_gid) {
                             vertex_groups[v_index - 1] = current_gid;
                         }
                     }
@@ -616,9 +643,41 @@ class Object {
                 }
             }
             vertex_buffer.init(device, vertices);
+
+            std::stringstream s;
+            s << "------------------POINTS\n";
+            std::map<unsigned int, unsigned int> id_to_num_pivot_points;
+            for (unsigned int i = 0; i < vertex_coords.size(); i++) {
+
+                if (vertex_groups[i] == id_giver.get_id("person.left_leg")) {
+                    s << vertex_coords[i][1] << " ";
+                    if (!is_pivot[i]) {
+                        s << "is not pivot\n";
+                    } else {
+                        s << "is pivot\n";
+                    }
+                }
+                if (!is_pivot[i]) {
+                    continue;
+                }
+                id_to_num_pivot_points[vertex_groups[i]]++;
+                std::array<float, 3> &sum_array = id_to_pivot_point[vertex_groups[i]];
+                for (unsigned int j = 0; j < 3; j++) {
+                    sum_array[j] += vertex_coords[i][j];
+                }
+            }
+            OutputDebugStringA(s.str().c_str());
+
+            for (const auto &[id, num] : id_to_num_pivot_points) {
+                std::array<float, 3> &sum_array = id_to_pivot_point[id];
+                for (unsigned int j = 0; j < 3; j++) {
+                    sum_array[j] /= num;
+                }
+            }
         }
 
         void draw(ComPtr<ID3D12GraphicsCommandList> &command_list) {
+            texture.use(command_list, 1); // 1 is the texture argument number
             command_list->IASetVertexBuffers(0, 1, &vertex_buffer.get_view());
             command_list->DrawInstanced(vertex_buffer.get_vertex_count(), 1, 0, 0);
         }
@@ -626,14 +685,94 @@ class Object {
 
 class Player {
     private:
+        float time = 0;
         float x = 0, z = 0;
-        constexpr static float y = 2, camera_back_dist = 3;
+        constexpr static float y = 3, camera_back_dist = 3;
+        constexpr static float viewing_down_angle = -0.7;
         float angle = 0;
         float velocity_x_forward = 0, velocity_x_backward = 0, velocity_z_forward = 0,
               velocity_z_backward = 0, angular_velocity_left = 0, angular_velocity_right = 0;
 
+        float hand_pivot_y = 0, leg_pivot_y = 0;
+
+        Object person_obj;
+
+        unsigned int off_mat_id = 0, left_leg_mat_id = 0, right_leg_mat_id = 0,
+                     left_hand_mat_id = 0, right_hand_mat_id = 0;
+
+        void fill_view_matrix(vs_const_buffer_t &buffer) {
+
+            DirectX::XMMATRIX view;
+            view = DirectX::XMMatrixMultiply(DirectX::XMMatrixTranslation(-x, -y, -z),
+                                             DirectX::XMMatrixRotationY(-angle));
+            view = DirectX::XMMatrixMultiply(view,
+                                             DirectX::XMMatrixTranslation(0, 0, camera_back_dist));
+            view = DirectX::XMMatrixMultiply(view, DirectX::XMMatrixRotationX(viewing_down_angle));
+
+            view = XMMatrixTranspose(view);
+            XMStoreFloat4x4(&buffer.matView, view);
+        }
+
+        DirectX::XMMATRIX rotate_by_y_pivot(float pivot, float rotation) {
+            DirectX::XMMATRIX rotation_matrix = DirectX::XMMatrixTranslation(0, -pivot, 0);
+            rotation_matrix = DirectX::XMMatrixMultiply(rotation_matrix,
+                                                        DirectX::XMMatrixRotationX(rotation));
+            rotation_matrix = DirectX::XMMatrixMultiply(
+                rotation_matrix, DirectX::XMMatrixTranslation(0, pivot, 0));
+            return rotation_matrix;
+        }
+
+        void fill_person_matrices(vs_const_buffer_t &buffer) {
+            DirectX::XMMATRIX off;
+
+            off = DirectX::XMMatrixMultiply(DirectX::XMMatrixRotationY(angle),
+                                            DirectX::XMMatrixTranslation(x, 0, z));
+
+            DirectX::XMMATRIX left_hand_matrix = rotate_by_y_pivot(hand_pivot_y, std::sin(time));
+            left_hand_matrix = DirectX::XMMatrixMultiply(left_hand_matrix, off);
+
+            DirectX::XMMATRIX right_hand_matrix = rotate_by_y_pivot(hand_pivot_y, std::sin(time));
+            right_hand_matrix = DirectX::XMMatrixMultiply(right_hand_matrix, off);
+
+            DirectX::XMMATRIX left_leg_matrix = rotate_by_y_pivot(leg_pivot_y, std::sin(time));
+            left_leg_matrix = DirectX::XMMatrixMultiply(left_leg_matrix, off);
+
+            DirectX::XMMATRIX right_leg_matrix = rotate_by_y_pivot(leg_pivot_y, std::sin(time));
+            right_leg_matrix = DirectX::XMMatrixMultiply(right_leg_matrix, off);
+
+            off = XMMatrixTranspose(off);
+            left_leg_matrix = XMMatrixTranspose(left_leg_matrix);
+            right_leg_matrix = XMMatrixTranspose(right_leg_matrix);
+            left_hand_matrix = XMMatrixTranspose(left_hand_matrix);
+            right_hand_matrix = XMMatrixTranspose(right_hand_matrix);
+            XMStoreFloat4x4(&buffer.matWorld[off_mat_id], off);
+            XMStoreFloat4x4(&buffer.matWorld[left_leg_mat_id], left_leg_matrix);
+            XMStoreFloat4x4(&buffer.matWorld[right_leg_mat_id], right_leg_matrix);
+            XMStoreFloat4x4(&buffer.matWorld[left_hand_mat_id], left_hand_matrix);
+            XMStoreFloat4x4(&buffer.matWorld[right_hand_mat_id], right_hand_matrix);
+        }
+
     public:
-        void init() {}
+        void init(ComPtr<ID3D12Device> &device, Texture_loader &texture_loader,
+                  const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle,
+                  const D3D12_GPU_DESCRIPTOR_HANDLE &gpu_handle, Id_giver &id_giver) {
+            person_obj.init(device, texture_loader, LR"(resources/person.png)",
+                            LR"(resources/person.wobj)", cpu_handle, gpu_handle, id_giver);
+
+            off_mat_id = id_giver.get_id("person.off");
+            left_leg_mat_id = id_giver.get_id("person.left_leg");
+            right_leg_mat_id = id_giver.get_id("person.right_leg");
+            left_hand_mat_id = id_giver.get_id("person.left_hand");
+            right_hand_mat_id = id_giver.get_id("person.right_hand");
+
+            hand_pivot_y = person_obj.get_pivot(right_hand_mat_id)[1];
+            leg_pivot_y = person_obj.get_pivot(right_leg_mat_id)[1];
+
+            std::stringstream s;
+            s << "--------------PIVOTS\nleft leg pivot: " << hand_pivot_y << " " << leg_pivot_y
+              << "\n";
+            OutputDebugStringA(s.str().c_str());
+        }
 
         void key_down(WPARAM key_code) {
             switch (key_code) {
@@ -683,17 +822,19 @@ class Player {
 
         void update(float delta_time) {
 
+            time += delta_time;
+
             float velocity_z = velocity_z_forward - velocity_z_backward;
             float velocity_x = velocity_x_forward - velocity_x_backward;
-            float angular_velocity = angular_velocity_left - angular_velocity_right;
+            float angular_velocity = angular_velocity_right - angular_velocity_left;
 
             std::stringstream s;
-            s << "IN UPDATE: " << delta_time << " " << velocity_x << "\n";
+            s << "IN UPDATE: " << delta_time << " " << angle << "\n";
             OutputDebugStringA(s.str().c_str());
 
             float sin_angle = std::sin(angle), cos_angle = std::cos(angle);
-            float forward_x = -sin_angle, forward_z = cos_angle;
-            float left_x = cos_angle, left_z = sin_angle;
+            float forward_x = sin_angle, forward_z = cos_angle;
+            float left_x = cos_angle, left_z = -sin_angle;
 
             x += (left_x * velocity_x + forward_x * velocity_z) * delta_time;
             z += (forward_z * velocity_z + left_z * velocity_x) * delta_time;
@@ -707,21 +848,12 @@ class Player {
         }
 
         void fill_const_buffer(vs_const_buffer_t &buffer) {
+            fill_view_matrix(buffer);
+            fill_person_matrices(buffer);
+        }
 
-            float forward_x = -std::sin(angle), forward_z = std::cos(angle);
-
-            DirectX::XMMATRIX view;
-
-            view = DirectX::XMMatrixMultiply(DirectX::XMMatrixRotationY(angle),
-                                             DirectX::XMMatrixRotationX(-0.4));
-            view = DirectX::XMMatrixMultiply(
-
-                DirectX::XMMatrixTranslation(-x + forward_x * camera_back_dist, -y,
-                                             -z + forward_z * camera_back_dist),
-                view);
-
-            view = XMMatrixTranspose(view);
-            XMStoreFloat4x4(&buffer.matView, view);
+        void draw(ComPtr<ID3D12GraphicsCommandList> &command_list) {
+            person_obj.draw(command_list);
         }
 };
 
@@ -814,13 +946,15 @@ class painter {
 
             vs_const_buffer_t buff;
 
-            player.fill_const_buffer(buff);
-
             // XMStoreFloat4x4(&buff.matWorld[0], world);
             for (unsigned int i = 0; i < 10; i++) {
                 XMStoreFloat4x4(&buff.matWorld[i], alternative);
             }
+
+            player.fill_const_buffer(buff);
+
             // XMStoreFloat4x4(&buff.matWorld[object_id_giver.get_id("person.right_leg")], world);
+
 
             XMStoreFloat4x4(&buff.matProj, proj);
 
@@ -998,9 +1132,11 @@ class painter {
             set_root_signature();
             create_graphics_pipeline_state();
             // cube_vertex_buffer.init(m_device, gen_data());
-            house_object.init(m_device, texture_loader, LR"(resources/person.png)",
-                              LR"(resources/person.wobj)", const_heaps.get_cpu_handle(1),
-                              object_id_giver);
+            house_object.init(m_device, texture_loader, LR"(resources/house.png)",
+                              LR"(resources/house.wobj)", const_heaps.get_cpu_handle(1),
+                              const_heaps.get_gpu_handle(1), object_id_giver);
+            player.init(m_device, texture_loader, const_heaps.get_cpu_handle(2),
+                        const_heaps.get_gpu_handle(2), object_id_giver);
             object_id_giver.write();
             matrix_buffer.init(m_device, sizeof(vs_const_buffer_t), const_heaps.get_cpu_handle(0));
             depth_buffer.init(m_device, width, height);
@@ -1064,7 +1200,7 @@ class painter {
 
             init_command_queue();
             init_swap_chain();
-            const_heaps.init(m_device, 2);
+            const_heaps.init(m_device, 3);
             {
                 D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
                 rtvHeapDesc.NumDescriptors = FrameCount;
@@ -1154,8 +1290,11 @@ class painter {
 
             m_commandList[m_frameIndex]->SetGraphicsRootDescriptorTable(
                 0, const_heaps.get_gpu_handle(0));
+
+            /*
             m_commandList[m_frameIndex]->SetGraphicsRootDescriptorTable(
-                1, const_heaps.get_gpu_handle(1));
+                1, const_heaps.get_gpu_handle(2));
+                */
 
 
             D3D12_VIEWPORT viewport = {
@@ -1208,6 +1347,7 @@ class painter {
             1, 0, 0);
                                                        */
             house_object.draw(m_commandList[m_frameIndex]);
+            player.draw(m_commandList[m_frameIndex]);
 
             barrier.Transition.pResource = m_renderTargets[m_frameIndex].Get();
             barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
