@@ -1,4 +1,5 @@
 #include "Const_buffer.hpp"
+#include "Utility.hpp"
 
 unsigned int Const_buffer::find_larger_256_divisible(unsigned int size) {
     unsigned int masked_left = size & (~255);
@@ -7,7 +8,7 @@ unsigned int Const_buffer::find_larger_256_divisible(unsigned int size) {
 }
 
 void Const_buffer::init(ComPtr<ID3D12Device> &device, unsigned int size,
-                               const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
+                        const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle) {
 
     size = find_larger_256_divisible(size);
     D3D12_HEAP_PROPERTIES heapProps = {.Type = D3D12_HEAP_TYPE_UPLOAD,
@@ -30,16 +31,16 @@ void Const_buffer::init(ComPtr<ID3D12Device> &device, unsigned int size,
     };
 
 
-    device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                    D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                    IID_PPV_ARGS(&m_constBuffer));
+    check_output(device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+                                                 D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                 IID_PPV_ARGS(&m_constBuffer)));
 
     D3D12_CONSTANT_BUFFER_VIEW_DESC const_buffer_desc = {
         .BufferLocation = m_constBuffer->GetGPUVirtualAddress(), .SizeInBytes = size};
     device->CreateConstantBufferView(&const_buffer_desc, cpu_handle);
 
     D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
-    m_constBuffer->Map(0, &zero_range, &memory);
+    check_output(m_constBuffer->Map(0, &zero_range, &memory));
 }
 
 void *Const_buffer::data() {

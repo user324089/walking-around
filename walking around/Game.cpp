@@ -1,4 +1,5 @@
 #include "Game.hpp"
+#include "Utility.hpp"
 
 double Game::get_delta_time() {
     std::chrono::high_resolution_clock::time_point now_point =
@@ -104,10 +105,11 @@ void Game::set_root_signature() {
 
     ComPtr<ID3DBlob> signature;
     ComPtr<ID3DBlob> error;
-    D3D12SerializeRootSignature(&root_signature_desc, D3D_ROOT_SIGNATURE_VERSION_1, &signature,
-                                &error);
-    m_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(),
-                                  IID_PPV_ARGS(&m_rootSignature));
+    check_output(D3D12SerializeRootSignature(&root_signature_desc, D3D_ROOT_SIGNATURE_VERSION_1,
+                                             &signature, &error));
+    check_output(m_device->CreateRootSignature(0, signature->GetBufferPointer(),
+                                               signature->GetBufferSize(),
+                                               IID_PPV_ARGS(&m_rootSignature)));
 }
 
 void Game::create_graphics_pipeline_state() {
@@ -198,20 +200,7 @@ void Game::create_graphics_pipeline_state() {
         .SampleDesc = {.Count = 1, .Quality = 0}
     };
 
-    m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState));
-}
-
-void Game::load_assets() {
-    set_root_signature();
-    create_graphics_pipeline_state();
-    // cube_vertex_buffer.init(m_device, gen_data());
-    house_object.init(m_device, texture_loader, LR"(resources/house.png)",
-                      LR"(resources/house.wobj)", const_heaps.get_cpu_handle(1),
-                      const_heaps.get_gpu_handle(1), object_id_giver);
-    player.init(m_device, texture_loader, const_heaps.get_cpu_handle(2),
-                const_heaps.get_gpu_handle(2), object_id_giver);
-    matrix_buffer.init(m_device, sizeof(Shader_const_buffer), const_heaps.get_cpu_handle(0));
-    depth_buffer.init(m_device, width, height);
+    check_output(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pipelineState)));
 }
 
 void Game::init_debug_layer() {
@@ -223,7 +212,7 @@ void Game::init_debug_layer() {
 
 void Game::init_swap_chain() {
     ComPtr<IDXGIFactory2> factory;
-    CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&factory));
+    check_output(CreateDXGIFactory2(DXGI_CREATE_FACTORY_DEBUG, IID_PPV_ARGS(&factory)));
 
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
     swapChainDesc.Width = 0;
@@ -239,10 +228,10 @@ void Game::init_swap_chain() {
     swapChainDesc.Flags = 0;
 
     ComPtr<IDXGISwapChain1> swapChain;
-    factory->CreateSwapChainForHwnd(m_commandQueue.Get(), hwnd, &swapChainDesc, nullptr, nullptr,
-                                    &swapChain);
+    check_output(factory->CreateSwapChainForHwnd(m_commandQueue.Get(), hwnd, &swapChainDesc,
+                                                 nullptr, nullptr, &swapChain));
 
-    swapChain->QueryInterface(IID_PPV_ARGS(&m_swapChain));
+    check_output(swapChain->QueryInterface(IID_PPV_ARGS(&m_swapChain)));
 }
 
 void Game::init_command_queue() {
@@ -250,7 +239,7 @@ void Game::init_command_queue() {
     queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
-    m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue));
+    check_output(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
 }
 
 Game::Game() {}
@@ -267,7 +256,7 @@ void Game::init(HWND _hwnd) {
     init_debug_layer();
 #endif
 
-    D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_device));
+    check_output(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&m_device)));
 
     init_command_queue();
     init_swap_chain();
@@ -312,8 +301,15 @@ void Game::init(HWND _hwnd) {
     gpu_waiter.init(m_device);
 
     texture_loader.init();
-    // init_textures();
-    load_assets();
+    set_root_signature();
+    create_graphics_pipeline_state();
+    house_object.init(m_device, texture_loader, LR"(resources/house.png)",
+                      LR"(resources/house.wobj)", const_heaps.get_cpu_handle(1),
+                      const_heaps.get_gpu_handle(1), object_id_giver);
+    player.init(m_device, texture_loader, const_heaps.get_cpu_handle(2),
+                const_heaps.get_gpu_handle(2), object_id_giver);
+    matrix_buffer.init(m_device, sizeof(Shader_const_buffer), const_heaps.get_cpu_handle(0));
+    depth_buffer.init(m_device, width, height);
 }
 
 void Game::release() {}
@@ -347,9 +343,9 @@ void Game::paint() {
 
     HRESULT hr;
 
-    m_commandAllocator[m_frameIndex]->Reset();
-    m_commandList[m_frameIndex]->Reset(m_commandAllocator[m_frameIndex].Get(),
-                                       m_pipelineState.Get());
+    check_output(m_commandAllocator[m_frameIndex]->Reset());
+    check_output(m_commandList[m_frameIndex]->Reset(m_commandAllocator[m_frameIndex].Get(),
+                                                    m_pipelineState.Get()));
 
     m_commandList[m_frameIndex]->SetGraphicsRootSignature(m_rootSignature.Get());
 
@@ -409,19 +405,12 @@ void Game::paint() {
 
     m_commandList[m_frameIndex]->ResourceBarrier(1, &barrier);
 
-    hr = m_commandList[m_frameIndex]->Close();
-    if (hr != S_OK) {
-        throw 1;
-    }
+    check_output(m_commandList[m_frameIndex]->Close());
 
     ID3D12CommandList *ppCommandLists[] = {m_commandList[m_frameIndex].Get()};
     m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
-    hr = m_swapChain->Present(1, 0);
-
-    if (hr != S_OK) {
-        throw 1;
-    }
+    check_output(m_swapChain->Present(1, 0));
 
     gpu_waiter.wait(m_commandQueue);
 

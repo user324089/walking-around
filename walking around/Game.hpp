@@ -74,8 +74,6 @@ class Game {
 
         void create_graphics_pipeline_state();
 
-        void load_assets();
-
         void init_debug_layer();
 
         void init_swap_chain();

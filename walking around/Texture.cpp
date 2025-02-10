@@ -1,10 +1,10 @@
 #include "Texture.hpp"
-
+#include "Utility.hpp"
 #include "GPU_waiter.hpp"
 
 void Texture::init(ComPtr<ID3D12Device> &device, unsigned int width, unsigned int height,
-                          BYTE *data, const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle,
-                          const D3D12_GPU_DESCRIPTOR_HANDLE &_gpu_handle) {
+                   BYTE *data, const D3D12_CPU_DESCRIPTOR_HANDLE &cpu_handle,
+                   const D3D12_GPU_DESCRIPTOR_HANDLE &_gpu_handle) {
 
     gpu_handle = _gpu_handle;
 
@@ -16,12 +16,13 @@ void Texture::init(ComPtr<ID3D12Device> &device, unsigned int width, unsigned in
     queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
-    device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&command_queue));
+    check_output(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&command_queue)));
 
-    device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                   IID_PPV_ARGS(&command_allocator));
-    device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, command_allocator.Get(), nullptr,
-                              IID_PPV_ARGS(&command_list));
+    check_output(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                IID_PPV_ARGS(&command_allocator)));
+    check_output(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                           command_allocator.Get(), nullptr,
+                                           IID_PPV_ARGS(&command_list)));
 
 
     // Creating texture resource

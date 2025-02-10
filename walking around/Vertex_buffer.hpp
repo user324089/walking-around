@@ -1,5 +1,7 @@
 #pragma once
+#include "Windows_includes.hpp"
 
+#include "Utility.hpp"
 #include <vector>
 
 class Vertex_buffer {
@@ -35,13 +37,13 @@ class Vertex_buffer {
                 .Flags = D3D12_RESOURCE_FLAG_NONE
             };
 
-            device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                            IID_PPV_ARGS(&m_vertexBuffer));
+            check_output(device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+                                                         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                         IID_PPV_ARGS(&m_vertexBuffer)));
 
             void *vertex_memory;
             D3D12_RANGE zero_range = {.Begin = 0, .End = 0};
-            m_vertexBuffer->Map(0, &zero_range, &vertex_memory);
+            check_output(m_vertexBuffer->Map(0, &zero_range, &vertex_memory));
             std::memcpy(vertex_memory, vertex_data.data(), data_size);
             m_vertexBuffer->Unmap(0, nullptr);
 

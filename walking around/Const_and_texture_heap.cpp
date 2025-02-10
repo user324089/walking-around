@@ -1,4 +1,5 @@
 #include "Const_and_texture_heap.hpp"
+#include "Utility.hpp"
 
 void Const_and_texture_heap::init(ComPtr<ID3D12Device> &device, unsigned int number) {
     D3D12_DESCRIPTOR_HEAP_DESC constBuffHeapDesc = {.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
@@ -7,7 +8,7 @@ void Const_and_texture_heap::init(ComPtr<ID3D12Device> &device, unsigned int num
                                                         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
                                                     .NodeMask = 0};
 
-    device->CreateDescriptorHeap(&constBuffHeapDesc, IID_PPV_ARGS(&m_constBuffHeap));
+    check_output(device->CreateDescriptorHeap(&constBuffHeapDesc, IID_PPV_ARGS(&m_constBuffHeap)));
 
     increment = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 

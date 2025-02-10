@@ -68,30 +68,36 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR pCmdLine, int nCmdShow
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     static Game pnt;
 
-    switch (uMsg) {
-        case WM_CREATE:
-            pnt.init(hwnd);
-            break;
-        case WM_SIZE:
-            pnt.resize(LOWORD(lParam), HIWORD(lParam));
-            break;
-        case WM_DESTROY:
-            pnt.release();
-            PostQuitMessage(0);
-            return 0;
-        case WM_KEYDOWN:
-            pnt.key_down(wParam, lParam);
-            return 0;
-        case WM_KEYUP:
-            pnt.key_up(wParam, lParam);
-            return 0;
-        case WM_PAINT:
-            pnt.paint();
-            ValidateRect(hwnd, nullptr);
-            return 0;
-        case WM_USER:
-            pnt.update();
-            return 0;
+    try {
+        switch (uMsg) {
+            case WM_CREATE:
+                pnt.init(hwnd);
+                break;
+            case WM_SIZE:
+                pnt.resize(LOWORD(lParam), HIWORD(lParam));
+                break;
+            case WM_DESTROY:
+                pnt.release();
+                PostQuitMessage(0);
+                return 0;
+            case WM_KEYDOWN:
+                pnt.key_down(wParam, lParam);
+                return 0;
+            case WM_KEYUP:
+                pnt.key_up(wParam, lParam);
+                return 0;
+            case WM_PAINT:
+                pnt.paint();
+                ValidateRect(hwnd, nullptr);
+                return 0;
+            case WM_USER:
+                pnt.update();
+                return 0;
+        }
+    } catch (std::runtime_error &er) {
+        OutputDebugStringA(er.what());
+        PostQuitMessage(1);
+        return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }

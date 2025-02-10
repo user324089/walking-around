@@ -1,4 +1,5 @@
 #include "Depth_buffer.hpp"
+#include "Utility.hpp"
 
 void Depth_buffer::init_descriptor_heap(ComPtr<ID3D12Device> &device) {
     D3D12_DESCRIPTOR_HEAP_DESC depthBuffHeapDesc = {
@@ -8,7 +9,7 @@ void Depth_buffer::init_descriptor_heap(ComPtr<ID3D12Device> &device) {
         .NodeMask = 0,
     };
 
-    device->CreateDescriptorHeap(&depthBuffHeapDesc, IID_PPV_ARGS(&m_depthBuffHeap));
+    check_output(device->CreateDescriptorHeap(&depthBuffHeapDesc, IID_PPV_ARGS(&m_depthBuffHeap)));
 }
 
 void Depth_buffer::init(ComPtr<ID3D12Device> &device, UINT width, UINT height) {
@@ -39,9 +40,9 @@ void Depth_buffer::init(ComPtr<ID3D12Device> &device, UINT width, UINT height) {
         .Format = DXGI_FORMAT_D32_FLOAT, .DepthStencil = {.Depth = 1.0f, .Stencil = 0}
     };
 
-    device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-                                    D3D12_RESOURCE_STATE_DEPTH_WRITE, &clear_val,
-                                    IID_PPV_ARGS(&m_depthBuffer));
+    check_output(device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &desc,
+                                                 D3D12_RESOURCE_STATE_DEPTH_WRITE, &clear_val,
+                                                 IID_PPV_ARGS(&m_depthBuffer)));
 
 
     D3D12_DEPTH_STENCIL_VIEW_DESC view_desc{.Format = DXGI_FORMAT_D32_FLOAT,
