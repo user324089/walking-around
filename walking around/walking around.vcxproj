@@ -133,12 +133,36 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Const_and_texture_heap.cpp" />
+    <ClCompile Include="Const_buffer.cpp" />
+    <ClCompile Include="Depth_buffer.cpp" />
+    <ClCompile Include="Game.cpp" />
+    <ClCompile Include="GPU_waiter.cpp" />
+    <ClCompile Include="Id_giver.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="Object.cpp" />
+    <ClCompile Include="Player.cpp" />
+    <ClCompile Include="Texture.cpp" />
+    <ClCompile Include="Texture_loader.cpp" />
+    <ClCompile Include="Utility.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="main.h" />
+    <ClInclude Include="Const_and_texture_heap.hpp" />
+    <ClInclude Include="Const_buffer.hpp" />
+    <ClInclude Include="Depth_buffer.hpp" />
+    <ClInclude Include="Game.hpp" />
+    <ClInclude Include="GPU_waiter.hpp" />
+    <ClInclude Include="Id_giver.hpp" />
+    <ClInclude Include="Object.hpp" />
     <ClInclude Include="pixel_shader.h" />
+    <ClInclude Include="Player.hpp" />
+    <ClInclude Include="Shader_const_buffer.hpp" />
+    <ClInclude Include="Texture.hpp" />
+    <ClInclude Include="Texture_loader.hpp" />
+    <ClInclude Include="Utility.hpp" />
+    <ClInclude Include="Vertex_buffer.hpp" />
     <ClInclude Include="vertex_shader.h" />
+    <ClInclude Include="Windows_includes.hpp" />
   </ItemGroup>
   <ItemGroup>
     <FxCompile Include="PixelShader.hlsl">
