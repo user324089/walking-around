@@ -12,8 +12,9 @@ class Player {
     private:
         float time = 0;
         float x = 0, z = 0;
-        constexpr static float y = 3, camera_back_dist = 3;
-        constexpr static float viewing_down_angle = -0.8;
+        constexpr static float y = 5, camera_back_dist = 3;
+        constexpr static float viewing_down_angle = -0.6;
+        constexpr static float movement_speed = 5;
         float angle = 0;
         float velocity_x_forward = 0, velocity_x_backward = 0, velocity_z_forward = 0,
               velocity_z_backward = 0, angular_velocity_left = 0, angular_velocity_right = 0;

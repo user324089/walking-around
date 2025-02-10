@@ -139,8 +139,8 @@ void Player::update(float delta_time) {
     float forward_x = sin_angle, forward_z = cos_angle;
     float left_x = cos_angle, left_z = -sin_angle;
 
-    x += (left_x * velocity_x + forward_x * velocity_z) * delta_time;
-    z += (forward_z * velocity_z + left_z * velocity_x) * delta_time;
+    x += (left_x * velocity_x + forward_x * velocity_z) * delta_time * movement_speed;
+    z += (forward_z * velocity_z + left_z * velocity_x) * delta_time * movement_speed;
 
     angle += angular_velocity * delta_time;
     if (angle > 2 * std::numbers::pi_v<float>) {

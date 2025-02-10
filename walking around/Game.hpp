@@ -40,6 +40,7 @@ class Game {
         ComPtr<ID3D12RootSignature> m_rootSignature;
         ComPtr<ID3D12PipelineState> m_pipelineState;
 
+        enum heap_ids {const_buff, house_tex, person_tex, ground_tex, tree_tex, stone_tex, num};
         Const_and_texture_heap const_heaps;
 
         Const_buffer matrix_buffer;
@@ -59,7 +60,11 @@ class Game {
         Texture_loader texture_loader;
         Texture smile_texture;
 
-        Object house_object;
+        std::map<unsigned int, DirectX::XMMATRIX> obj_id_to_transform;
+        std::vector<Object> environment_objects;
+
+        void init_environment_objects();
+
         Id_giver object_id_giver;
 
         Player player;

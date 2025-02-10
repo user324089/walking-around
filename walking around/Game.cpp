@@ -1,6 +1,45 @@
 #include "Game.hpp"
 #include "Utility.hpp"
 
+void Game::init_environment_objects() {
+
+    environment_objects.emplace_back();
+    environment_objects.back().init(
+        m_device, texture_loader, LR"(resources/house.png)", LR"(resources/house.wobj)",
+        const_heaps.get_cpu_handle(heap_ids::house_tex),
+        const_heaps.get_gpu_handle(heap_ids::house_tex), object_id_giver);
+
+    obj_id_to_transform[object_id_giver.get_id("house.off")] =
+        DirectX::XMMatrixTranspose(DirectX::XMMatrixTranslation(1.0f, 0.0f, 5.0f));
+
+    environment_objects.emplace_back();
+    environment_objects.back().init(
+        m_device, texture_loader, LR"(resources/stone.png)", LR"(resources/stone.wobj)",
+        const_heaps.get_cpu_handle(heap_ids::stone_tex),
+        const_heaps.get_gpu_handle(heap_ids::stone_tex), object_id_giver);
+
+    obj_id_to_transform[object_id_giver.get_id("stone.off")] =
+        DirectX::XMMatrixTranspose(DirectX::XMMatrixTranslation(-2.0f, 0.0f, -3.0f));
+
+    environment_objects.emplace_back();
+    environment_objects.back().init(
+        m_device, texture_loader, LR"(resources/ground.png)", LR"(resources/ground.wobj)",
+        const_heaps.get_cpu_handle(heap_ids::ground_tex),
+        const_heaps.get_gpu_handle(heap_ids::ground_tex), object_id_giver);
+
+    obj_id_to_transform[object_id_giver.get_id("ground.off")] =
+        DirectX::XMMatrixTranspose(DirectX::XMMatrixIdentity());
+
+    environment_objects.emplace_back();
+    environment_objects.back().init(
+        m_device, texture_loader, LR"(resources/tree.png)", LR"(resources/tree.wobj)",
+        const_heaps.get_cpu_handle(heap_ids::tree_tex),
+        const_heaps.get_gpu_handle(heap_ids::tree_tex), object_id_giver);
+
+    obj_id_to_transform[object_id_giver.get_id("tree.off")] =
+        DirectX::XMMatrixTranspose(DirectX::XMMatrixTranslation(-4.0f, 0.0f, 3.0f));
+}
+
 double Game::get_delta_time() {
     std::chrono::high_resolution_clock::time_point now_point =
         std::chrono::high_resolution_clock::now();
@@ -39,6 +78,12 @@ void Game::recalculate_matrix(double angle) {
 
     for (unsigned int i = 0; i < 10; i++) {
         XMStoreFloat4x4(&buff.matWorld[i], alternative);
+    }
+
+    //object_id_giver.write();
+    for (const auto& [obj_id, transform] : obj_id_to_transform) {
+
+        XMStoreFloat4x4(&buff.matWorld[obj_id], transform);
     }
 
     player.fill_const_buffer(buff);
@@ -260,7 +305,7 @@ void Game::init(HWND _hwnd) {
 
     init_command_queue();
     init_swap_chain();
-    const_heaps.init(m_device, 3);
+    const_heaps.init(m_device, heap_ids::num);
     {
         D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
         rtvHeapDesc.NumDescriptors = FrameCount;
@@ -303,12 +348,14 @@ void Game::init(HWND _hwnd) {
     texture_loader.init();
     set_root_signature();
     create_graphics_pipeline_state();
-    house_object.init(m_device, texture_loader, LR"(resources/house.png)",
-                      LR"(resources/house.wobj)", const_heaps.get_cpu_handle(1),
-                      const_heaps.get_gpu_handle(1), object_id_giver);
-    player.init(m_device, texture_loader, const_heaps.get_cpu_handle(2),
-                const_heaps.get_gpu_handle(2), object_id_giver);
-    matrix_buffer.init(m_device, sizeof(Shader_const_buffer), const_heaps.get_cpu_handle(0));
+
+    init_environment_objects();
+
+
+    player.init(m_device, texture_loader, const_heaps.get_cpu_handle(heap_ids::person_tex),
+                const_heaps.get_gpu_handle(heap_ids::person_tex), object_id_giver);
+    matrix_buffer.init(m_device, sizeof(Shader_const_buffer),
+                       const_heaps.get_cpu_handle(heap_ids::const_buff));
     depth_buffer.init(m_device, width, height);
 }
 
@@ -395,7 +442,10 @@ void Game::paint() {
 
     m_commandList[m_frameIndex]->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    house_object.draw(m_commandList[m_frameIndex]);
+    for (auto& object : environment_objects) {
+        object.draw(m_commandList[m_frameIndex]);
+    }
+    
     player.draw(m_commandList[m_frameIndex]);
 
     barrier.Transition.pResource = m_renderTargets[m_frameIndex].Get();
